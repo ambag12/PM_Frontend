@@ -18,6 +18,8 @@ import Wiki from './pages/Wiki';
 import Milestones from './pages/Milestones';
 import Profile from './pages/Profile';
 import AdminPanel from './pages/AdminPanel';
+import Tenders from './pages/Tenders';
+import HR from './pages/HR';
 
 // Private Route component - redirects to login if not authenticated
 const PrivateRoute = ({ children }) => {
@@ -178,6 +180,28 @@ const AppRoutes = () => {
           <PrivateRoute>
             <AuthenticatedLayout>
               <Members />
+            </AuthenticatedLayout>
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/tenders"
+        element={
+          <PrivateRoute>
+            <AuthenticatedLayout>
+              <Tenders />
+            </AuthenticatedLayout>
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/hr"
+        element={
+          <PrivateRoute>
+            <AuthenticatedLayout>
+              <HR />
             </AuthenticatedLayout>
           </PrivateRoute>
         }

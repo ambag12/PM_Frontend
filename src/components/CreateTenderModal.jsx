@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FaTimes } from 'react-icons/fa';
+import React, { useState, useRef } from 'react';
+import { FaTimes, FaCalendarAlt } from 'react-icons/fa';
 import client from '../api/client';
 
 const CreateTenderModal = ({ projectId, onClose, onCreated }) => {
@@ -11,6 +11,8 @@ const CreateTenderModal = ({ projectId, onClose, onCreated }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const techDateRef = useRef(null);
+  const financialDateRef = useRef(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -57,7 +59,7 @@ const CreateTenderModal = ({ projectId, onClose, onCreated }) => {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <h2 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--text-primary)' }}>Create New Tender</h2>
-          <button 
+          <button
             onClick={onClose}
             style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '1.2rem' }}
           >
@@ -66,12 +68,12 @@ const CreateTenderModal = ({ projectId, onClose, onCreated }) => {
         </div>
 
         {error && (
-          <div style={{ 
-            backgroundColor: 'rgba(255, 59, 48, 0.1)', 
-            color: '#ff3b30', 
-            padding: '1rem', 
-            borderRadius: '8px', 
-            marginBottom: '1.5rem' 
+          <div style={{
+            backgroundColor: 'rgba(255, 59, 48, 0.1)',
+            color: '#ff3b30',
+            padding: '1rem',
+            borderRadius: '8px',
+            marginBottom: '1.5rem'
           }}>
             {error}
           </div>
@@ -108,24 +110,54 @@ const CreateTenderModal = ({ projectId, onClose, onCreated }) => {
 
           <div style={{ marginBottom: '1rem' }}>
             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Tech Opening Date</label>
-            <input
-              type="date"
-              className="input-field"
-              value={formData.tech_opeining}
-              onChange={(e) => setFormData({ ...formData, tech_opeining: e.target.value })}
-              style={{ width: '100%' }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                ref={techDateRef}
+                type="date"
+                className="input-field"
+                value={formData.tech_opeining}
+                onChange={(e) => setFormData({ ...formData, tech_opeining: e.target.value })}
+                style={{ width: '100%', paddingRight: '2.5rem' }}
+                onClick={(e) => e.target.showPicker && e.target.showPicker()}
+              />
+              <FaCalendarAlt
+                style={{
+                  position: 'absolute',
+                  right: '1rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--primary-500)',
+                  cursor: 'pointer',
+                  pointerEvents: 'none' // Click passes through to input
+                }}
+              />
+            </div>
           </div>
 
           <div style={{ marginBottom: '1.5rem' }}>
             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Financial Opening Date</label>
-            <input
-              type="date"
-              className="input-field"
-              value={formData.financial_opening}
-              onChange={(e) => setFormData({ ...formData, financial_opening: e.target.value })}
-              style={{ width: '100%' }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                ref={financialDateRef}
+                type="date"
+                className="input-field"
+                value={formData.financial_opening}
+                onChange={(e) => setFormData({ ...formData, financial_opening: e.target.value })}
+                style={{ width: '100%', paddingRight: '2.5rem' }}
+                onClick={(e) => e.target.showPicker && e.target.showPicker()}
+              />
+              <FaCalendarAlt
+                style={{
+                  position: 'absolute',
+                  right: '1rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--primary-500)',
+                  cursor: 'pointer',
+                  pointerEvents: 'none'
+                }}
+              />
+            </div>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>

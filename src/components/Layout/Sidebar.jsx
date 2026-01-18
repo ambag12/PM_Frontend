@@ -16,14 +16,21 @@ import {
     FaBug,
     FaFlag,
     FaBook,
-    FaChartBar
+    FaChartBar,
+    FaFileInvoiceDollar,
+    FaUserTie,
+    FaSearch,
+    FaComment
 } from 'react-icons/fa';
+import CreateRemarksModal from '../CreateRemarksModal';
 
 const Sidebar = ({ collapsed, onToggle }) => {
     const { user, logout } = useContext(AuthContext);
     const location = useLocation();
     const navigate = useNavigate();
     const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [showRemarksModal, setShowRemarksModal] = useState(false);
 
     const handleLogout = () => {
         logout();
@@ -35,9 +42,14 @@ const Sidebar = ({ collapsed, onToggle }) => {
         return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
     };
 
-    const mainNavItems = [
+    const coreNavItems = [
         { path: '/', icon: <FaHome />, label: 'Dashboard' },
         { path: '/create-project', icon: <FaPlus />, label: 'New Project' },
+    ];
+
+    const moduleNavItems = [
+        { path: '/tenders', icon: <FaFileInvoiceDollar />, label: 'Tenders' },
+        { path: '/hr', icon: <FaUserTie />, label: 'HR Management' },
     ];
 
     const adminNavItems = [
@@ -70,10 +82,10 @@ const Sidebar = ({ collapsed, onToggle }) => {
 
             {/* Navigation */}
             <nav className="sidebar-nav">
-                {/* Main Navigation */}
+                {/* Core Navigation */}
                 <div className="nav-section">
-                    <span className="nav-section-title">Main</span>
-                    {mainNavItems.map((item) => (
+                    <span className="nav-section-title">Core</span>
+                    {coreNavItems.map((item) => (
                         <NavLink
                             key={item.path}
                             to={item.path}
@@ -138,19 +150,37 @@ const Sidebar = ({ collapsed, onToggle }) => {
                             <span className="nav-item-icon"><FaUsers /></span>
                             <span className="nav-item-label">Members</span>
                         </NavLink>
-                        <NavLink
-                            to={`${location.pathname.split('/').slice(0, 3).join('/')}/settings`}
-                            className={`nav-item ${location.pathname.includes('/settings') ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon"><FaCog /></span>
-                            <span className="nav-item-label">Settings</span>
-                        </NavLink>
                     </div>
                 )}
 
-                {/* Admin Navigation */}
+                {/* Modules Navigation */}
                 <div className="nav-section">
-                    <span className="nav-section-title">Admin</span>
+                    <span className="nav-section-title">Modules</span>
+                    {moduleNavItems.map((item) => (
+                        <NavLink
+                            key={item.path}
+                            to={item.path}
+                            className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
+                        >
+                            <span className="nav-item-icon">{item.icon}</span>
+                            <span className="nav-item-label">{item.label}</span>
+                        </NavLink>
+                    ))}
+
+                    {/* Remarks Button */}
+                    <div
+                        className="nav-item"
+                        onClick={() => setShowRemarksModal(true)}
+                        style={{ cursor: 'pointer' }}
+                    >
+                        <span className="nav-item-icon"><FaComment /></span>
+                        <span className="nav-item-label">Remarks</span>
+                    </div>
+                </div>
+
+                {/* Administrative */}
+                <div className="nav-section">
+                    <span className="nav-section-title">Administrative</span>
                     {adminNavItems.map((item) => (
                         <NavLink
                             key={item.path}
@@ -161,11 +191,29 @@ const Sidebar = ({ collapsed, onToggle }) => {
                             <span className="nav-item-label">{item.label}</span>
                         </NavLink>
                     ))}
+                    <NavLink
+                        to="/project/settings"
+                        className={`nav-item ${location.pathname.includes('/settings') ? 'active' : ''}`}
+                    >
+                        <span className="nav-item-icon"><FaCog /></span>
+                        <span className="nav-item-label">App Settings</span>
+                    </NavLink>
                 </div>
             </nav>
 
             {/* User Profile & Logout */}
             <div className="sidebar-footer">
+                <div className="sidebar-search">
+                    <FaSearch className="sidebar-search-icon" />
+                    <input
+                        type="text"
+                        className="sidebar-search-input"
+                        placeholder="Search..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+
                 <div className="sidebar-user" onClick={handleLogout}>
                     <div className="sidebar-user-avatar">
                         {getInitials(user?.full_name)}
@@ -176,6 +224,16 @@ const Sidebar = ({ collapsed, onToggle }) => {
                     </div>
                 </div>
             </div>
+
+            {/* Remarks Modal */}
+            {showRemarksModal && (
+                <CreateRemarksModal
+                    onClose={() => setShowRemarksModal(false)}
+                    onCreated={() => {
+                        setShowRemarksModal(false);
+                    }}
+                />
+            )}
         </aside>
     );
 };
