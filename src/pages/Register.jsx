@@ -1,160 +1,182 @@
-import React, { useState, useContext } from 'react';
+import React, { useContext, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { FaUser, FaEnvelope, FaIdBadge, FaExclamationCircle, FaArrowRight } from 'react-icons/fa';
 import { AuthContext } from '../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import Header from '../components/Header';
+import { getErrorMessage } from '../api/client';
+import { AuthAside, AuthMobileBrand, PasswordInput } from '../components/overview/AuthAside';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_RE = /^[\w.-]+$/;
+
+const strengthOf = (pw) => {
+    let s = 0;
+    if (pw.length >= 8) s += 1;
+    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) s += 1;
+    if (/\d/.test(pw)) s += 1;
+    if (/[^\w\s]/.test(pw) || pw.length >= 14) s += 1;
+    return s;
+};
+const STRENGTH = [
+    { label: 'Too short', tone: 'danger' },
+    { label: 'Weak', tone: 'danger' },
+    { label: 'Fair', tone: 'warning' },
+    { label: 'Good', tone: 'success' },
+    { label: 'Strong', tone: 'success' },
+];
+
+const FIELDS = [
+    { key: 'full_name', label: 'Full name', icon: <FaIdBadge size={13} />, autoComplete: 'name', placeholder: 'e.g. Ayesha Khan' },
+    { key: 'username', label: 'Username', icon: <FaUser size={13} />, autoComplete: 'username', placeholder: 'e.g. a.khan' },
+    { key: 'email', label: 'Work email', icon: <FaEnvelope size={13} />, autoComplete: 'email', placeholder: 'name@department.gov', type: 'email' },
+];
 
 const Register = () => {
-  const [formData, setFormData] = useState({
-    username: '',
-    password: '',
-    full_name: '',
-    email: '',
-    accepted_terms: false
-  });
-  const [error, setError] = useState('');
-  const { register } = useContext(AuthContext);
-  const navigate = useNavigate();
+    const { register } = useContext(AuthContext);
+    const navigate = useNavigate();
+    const [form, setForm] = useState({ full_name: '', username: '', email: '', password: '', confirm: '' });
+    const [errors, setErrors] = useState({});
+    const [error, setError] = useState('');
+    const [submitting, setSubmitting] = useState(false);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+    const set = (key) => (e) => {
+        setForm((f) => ({ ...f, [key]: e.target.value }));
+        if (errors[key]) setErrors((x) => ({ ...x, [key]: undefined }));
+    };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      await register(formData);
-      navigate('/');
-    } catch (err) {
-      console.error("Registration error details:", err.response?.data);
-      const errorMessage = err.response?.data?._error_message ||
-        err.response?.data?.detail ||
-        (typeof err.response?.data === 'object' ? JSON.stringify(err.response.data) : 'Registration failed. Please check your inputs.');
-      setError(errorMessage);
-    }
-  };
+    const validate = () => {
+        const next = {};
+        if (!form.full_name.trim()) next.full_name = 'Enter your full name.';
+        if (!form.username.trim()) next.username = 'Choose a username.';
+        else if (!USERNAME_RE.test(form.username.trim())) next.username = 'Use letters, numbers, dots, dashes or underscores only.';
+        if (!form.email.trim()) next.email = 'Enter your email address.';
+        else if (!EMAIL_RE.test(form.email.trim())) next.email = 'Enter a valid email address.';
+        if (!form.password) next.password = 'Choose a password.';
+        else if (form.password.length < 6) next.password = 'Use at least 6 characters.';
+        if (!form.confirm) next.confirm = 'Repeat your password.';
+        else if (form.confirm !== form.password) next.confirm = 'Passwords do not match.';
+        setErrors(next);
+        return Object.keys(next).length === 0;
+    };
 
-  return (
-    <div>
-      <Header title="Project Management System" subtitle="Professional Project Tracking & Management" />
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        if (!validate()) return;
+        setSubmitting(true);
+        try {
+            await register({
+                username: form.username.trim(),
+                full_name: form.full_name.trim(),
+                email: form.email.trim(),
+                password: form.password,
+            });
+            navigate('/', { replace: true });
+        } catch (err) {
+            // Map field errors from the API onto the inputs where possible
+            const data = err?.response?.data;
+            const fieldErrors = {};
+            if (data && typeof data === 'object') {
+                ['username', 'full_name', 'email', 'password'].forEach((k) => {
+                    if (data[k]) fieldErrors[k] = [].concat(data[k]).join(' ');
+                });
+            }
+            setErrors(fieldErrors);
+            setError(Object.keys(fieldErrors).length ? 'Please fix the highlighted fields.' : getErrorMessage(err, 'Could not create your account.'));
+            setSubmitting(false);
+        }
+    };
 
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: 'calc(100vh - 200px)',
-        padding: '2rem 1rem'
-      }}>
-        <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2.5rem' }}>
-          <h2 style={{
-            textAlign: 'center',
-            fontSize: '1.8rem',
-            fontWeight: '700',
-            color: 'var(--text-dark)',
-            marginBottom: '0.5rem'
-          }}>Create Account</h2>
-          <p style={{
-            textAlign: 'center',
-            color: 'var(--text-secondary)',
-            marginBottom: '2rem',
-            fontSize: '0.95rem'
-          }}>Join us to manage your projects professionally</p>
+    const strength = form.password ? strengthOf(form.password) : null;
 
-          {error && (
-            <div style={{
-              background: 'rgba(244, 67, 54, 0.1)',
-              color: 'var(--status-pending)',
-              padding: '0.875rem',
-              borderRadius: 'var(--radius-md)',
-              marginBottom: '1.5rem',
-              fontSize: '0.9rem',
-              border: '1px solid rgba(244, 67, 54, 0.3)'
-            }}>
-              {error}
-            </div>
-          )}
+    return (
+        <div className="auth-shell">
+            <AuthAside heading="Join your team’s project workspace." />
+            <main className="auth-main">
+                <div className="auth-card">
+                    <AuthMobileBrand />
+                    <h2>Create your account</h2>
+                    <p className="auth-sub">It takes less than a minute. You can be added to projects afterwards.</p>
 
-          <form onSubmit={handleSubmit}>
-            <div className="input-group">
-              <label className="input-label">Full Name</label>
-              <input
-                type="text"
-                name="full_name"
-                className="input-field"
-                value={formData.full_name}
-                onChange={handleChange}
-                placeholder="Enter your full name"
-                required
-              />
-            </div>
+                    {error && (
+                        <div className="alert alert-error mb-4" role="alert">
+                            <FaExclamationCircle style={{ marginTop: 3, flexShrink: 0 }} />
+                            <span>{error}</span>
+                        </div>
+                    )}
 
-            <div className="input-group">
-              <label className="input-label">Username</label>
-              <input
-                type="text"
-                name="username"
-                className="input-field"
-                value={formData.username}
-                onChange={handleChange}
-                placeholder="Choose a username"
-                required
-              />
-            </div>
+                    <form onSubmit={handleSubmit} noValidate>
+                        {FIELDS.map((f) => (
+                            <div className="form-group" key={f.key}>
+                                <label className="form-label" htmlFor={`reg-${f.key}`}>{f.label}</label>
+                                <div className="form-input-icon">
+                                    {f.icon}
+                                    <input
+                                        id={`reg-${f.key}`}
+                                        type={f.type || 'text'}
+                                        className={`form-input ${errors[f.key] ? 'is-invalid' : ''}`}
+                                        value={form[f.key]}
+                                        onChange={set(f.key)}
+                                        autoComplete={f.autoComplete}
+                                        placeholder={f.placeholder}
+                                        autoFocus={f.key === 'full_name'}
+                                        aria-invalid={errors[f.key] ? 'true' : undefined}
+                                        aria-describedby={errors[f.key] ? `reg-${f.key}-err` : undefined}
+                                    />
+                                </div>
+                                {errors[f.key] && <div id={`reg-${f.key}-err`} className="form-error">{errors[f.key]}</div>}
+                            </div>
+                        ))}
 
-            <div className="input-group">
-              <label className="input-label">Email</label>
-              <input
-                type="email"
-                name="email"
-                className="input-field"
-                value={formData.email}
-                onChange={handleChange}
-                placeholder="Enter your email address"
-                required
-              />
-            </div>
+                        <div className="form-grid">
+                            <div className="form-group">
+                                <label className="form-label" htmlFor="reg-password">Password</label>
+                                <PasswordInput
+                                    id="reg-password"
+                                    value={form.password}
+                                    onChange={set('password')}
+                                    invalid={!!errors.password}
+                                    autoComplete="new-password"
+                                    describedBy={errors.password ? 'reg-password-err' : 'reg-password-hint'}
+                                />
+                                {errors.password ? (
+                                    <div id="reg-password-err" className="form-error">{errors.password}</div>
+                                ) : strength !== null ? (
+                                    <div id="reg-password-hint">
+                                        <div className={`ov-strength tone-${STRENGTH[strength].tone}`} aria-hidden="true">
+                                            {[1, 2, 3, 4].map((i) => <span key={i} className={i <= strength ? 'on' : ''} />)}
+                                        </div>
+                                        <div className="form-hint">Strength: {STRENGTH[strength].label}</div>
+                                    </div>
+                                ) : (
+                                    <div id="reg-password-hint" className="form-hint">At least 6 characters.</div>
+                                )}
+                            </div>
+                            <div className="form-group">
+                                <label className="form-label" htmlFor="reg-confirm">Confirm password</label>
+                                <PasswordInput
+                                    id="reg-confirm"
+                                    value={form.confirm}
+                                    onChange={set('confirm')}
+                                    invalid={!!errors.confirm}
+                                    autoComplete="new-password"
+                                    describedBy={errors.confirm ? 'reg-confirm-err' : undefined}
+                                />
+                                {errors.confirm && <div id="reg-confirm-err" className="form-error">{errors.confirm}</div>}
+                            </div>
+                        </div>
 
-            <div className="input-group">
-              <label className="input-label">Password</label>
-              <input
-                type="password"
-                name="password"
-                className="input-field"
-                value={formData.password}
-                onChange={handleChange}
-                placeholder="Create a strong password"
-                required
-              />
-            </div>
+                        <button type="submit" className="btn btn-primary btn-lg w-full mt-2" disabled={submitting}>
+                            {submitting ? <><span className="spinner spinner-sm" /> Creating account…</> : <>Create account <FaArrowRight size={12} /></>}
+                        </button>
+                    </form>
 
-            <div className="input-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                name="accepted_terms"
-                id="accepted_terms"
-                checked={formData.accepted_terms}
-                onChange={(e) => setFormData({ ...formData, accepted_terms: e.target.checked })}
-                required
-                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-              />
-              <label htmlFor="accepted_terms" className="input-label" style={{ marginBottom: 0, cursor: 'pointer' }}>
-                I accept the Terms of Service
-              </label>
-            </div>
-
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
-              Register
-            </button>
-          </form>
-
-          <div style={{ marginTop: '2rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-            Already have an account? <Link to="/login" style={{ color: 'var(--action-green)', fontWeight: '600' }}>Sign In</Link>
-          </div>
+                    <p className="ov-auth-switch">
+                        Already have an account? <Link to="/login">Sign in</Link>
+                    </p>
+                </div>
+            </main>
         </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 export default Register;
-

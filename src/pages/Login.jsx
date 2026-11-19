@@ -1,103 +1,110 @@
-import React, { useState, useContext } from 'react';
+import React, { useContext, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { FaUser, FaExclamationCircle, FaArrowRight } from 'react-icons/fa';
 import { AuthContext } from '../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import Header from '../components/Header';
+import { getErrorMessage } from '../api/client';
+import { AuthAside, AuthMobileBrand, PasswordInput } from '../components/overview/AuthAside';
 
 const Login = () => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const { login } = useContext(AuthContext);
-  const navigate = useNavigate();
+    const { login } = useContext(AuthContext);
+    const navigate = useNavigate();
+    const location = useLocation();
+    const [form, setForm] = useState({ username: '', password: '' });
+    const [errors, setErrors] = useState({});
+    const [error, setError] = useState('');
+    const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      await login(username, password);
-      navigate('/');
-    } catch (err) {
-      setError('Invalid credentials. Please try again.');
-    }
-  };
+    const set = (key) => (e) => {
+        setForm((f) => ({ ...f, [key]: e.target.value }));
+        if (errors[key]) setErrors((x) => ({ ...x, [key]: undefined }));
+    };
 
-  return (
-    <div>
-      <Header title="Project Management System" subtitle="Professional Project Tracking & Management" />
+    const validate = () => {
+        const next = {};
+        if (!form.username.trim()) next.username = 'Enter your username or email.';
+        if (!form.password) next.password = 'Enter your password.';
+        setErrors(next);
+        return Object.keys(next).length === 0;
+    };
 
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: 'calc(100vh - 200px)',
-        padding: '2rem 1rem'
-      }}>
-        <div className="card" style={{ width: '100%', maxWidth: '450px', padding: '2.5rem' }}>
-          <h2 style={{
-            textAlign: 'center',
-            fontSize: '1.8rem',
-            fontWeight: '700',
-            color: 'var(--text-dark)',
-            marginBottom: '0.5rem'
-          }}>Welcome Back</h2>
-          <p style={{
-            textAlign: 'center',
-            color: 'var(--text-secondary)',
-            marginBottom: '2rem',
-            fontSize: '0.95rem'
-          }}>Sign in to your account to continue</p>
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        if (!validate()) return;
+        setSubmitting(true);
+        try {
+            await login(form.username.trim(), form.password);
+            navigate(location.state?.from || '/', { replace: true });
+        } catch (err) {
+            const status = err?.response?.status;
+            setError(status === 400 || status === 401
+                ? getErrorMessage(err, 'Username or password is incorrect.')
+                : getErrorMessage(err, 'Could not sign in. Please try again.'));
+            setSubmitting(false);
+        }
+    };
 
-          {error && (
-            <div style={{
-              background: 'rgba(244, 67, 54, 0.1)',
-              color: 'var(--status-pending)',
-              padding: '0.875rem',
-              borderRadius: 'var(--radius-md)',
-              marginBottom: '1.5rem',
-              fontSize: '0.9rem',
-              border: '1px solid rgba(244, 67, 54, 0.3)'
-            }}>
-              {error}
-            </div>
-          )}
+    return (
+        <div className="auth-shell">
+            <AuthAside />
+            <main className="auth-main">
+                <div className="auth-card">
+                    <AuthMobileBrand />
+                    <h2>Welcome back</h2>
+                    <p className="auth-sub">Sign in to continue to your projects.</p>
 
-          <form onSubmit={handleSubmit}>
-            <div className="input-group">
-              <label className="input-label">Username</label>
-              <input
-                type="text"
-                className="input-field"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username"
-                required
-              />
-            </div>
+                    {error && (
+                        <div className="alert alert-error mb-4" role="alert">
+                            <FaExclamationCircle style={{ marginTop: 3, flexShrink: 0 }} />
+                            <span>{error}</span>
+                        </div>
+                    )}
 
-            <div className="input-group">
-              <label className="input-label">Password</label>
-              <input
-                type="password"
-                className="input-field"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                required
-              />
-            </div>
+                    <form onSubmit={handleSubmit} noValidate>
+                        <div className="form-group">
+                            <label className="form-label" htmlFor="login-username">Username or email</label>
+                            <div className="form-input-icon">
+                                <FaUser size={13} />
+                                <input
+                                    id="login-username"
+                                    className={`form-input ${errors.username ? 'is-invalid' : ''}`}
+                                    value={form.username}
+                                    onChange={set('username')}
+                                    autoComplete="username"
+                                    autoFocus
+                                    placeholder="e.g. a.khan"
+                                    aria-invalid={errors.username ? 'true' : undefined}
+                                    aria-describedby={errors.username ? 'login-username-err' : undefined}
+                                />
+                            </div>
+                            {errors.username && <div id="login-username-err" className="form-error">{errors.username}</div>}
+                        </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '0.5rem' }}>
-              Sign In
-            </button>
-          </form>
+                        <div className="form-group">
+                            <label className="form-label" htmlFor="login-password">Password</label>
+                            <PasswordInput
+                                id="login-password"
+                                value={form.password}
+                                onChange={set('password')}
+                                invalid={!!errors.password}
+                                placeholder="Your password"
+                                describedBy={errors.password ? 'login-password-err' : undefined}
+                            />
+                            {errors.password && <div id="login-password-err" className="form-error">{errors.password}</div>}
+                        </div>
 
-          <div style={{ marginTop: '2rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-            Don't have an account? <Link to="/register" style={{ color: 'var(--action-green)', fontWeight: '600' }}>Register</Link>
-          </div>
+                        <button type="submit" className="btn btn-primary btn-lg w-full mt-2" disabled={submitting}>
+                            {submitting ? <><span className="spinner spinner-sm" /> Signing in…</> : <>Sign in <FaArrowRight size={12} /></>}
+                        </button>
+                    </form>
+
+                    <p className="ov-auth-switch">
+                        New to the workspace? <Link to="/register">Create an account</Link>
+                    </p>
+                </div>
+            </main>
         </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 export default Login;

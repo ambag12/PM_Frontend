@@ -1,90 +1,90 @@
 import React, { useState } from 'react';
-import { FaThumbsUp, FaThumbsDown } from 'react-icons/fa';
+import { FaThumbsUp, FaThumbsDown, FaRegThumbsUp } from 'react-icons/fa';
+import '../styles/work.css';
 
-const VoteButtons = ({ 
-  isUpvoted, 
-  isDownvoted, 
-  upvotesCount = 0, 
-  downvotesCount = 0,
-  onUpvote, 
-  onDownvote,
-  onRemoveVote
+/*
+ * Upvote / downvote control.
+ * Taiga votes are binary: "upvote" adds your vote, "downvote" removes it.
+ *   <VoteButtons isUpvoted upvotesCount={2} onUpvote={…} onDownvote={…} onCountClick={…} />
+ * Legacy props (isDownvoted, downvotesCount, onRemoveVote) are still accepted.
+ */
+const VoteButtons = ({
+    isUpvoted,
+    isDownvoted = false,
+    upvotesCount = 0,
+    downvotesCount = 0,
+    onUpvote,
+    onDownvote,
+    onRemoveVote,
+    onCountClick,
+    countExpanded,
+    size = 'sm',
+    disabled = false,
 }) => {
-  const [loading, setLoading] = useState(false);
+    const [busy, setBusy] = useState(null);
 
-  const handleUpvote = async () => {
-    setLoading(true);
-    try {
-      if (isUpvoted && onRemoveVote) {
-        await onRemoveVote();
-      } else {
-        await onUpvote();
-      }
-    } catch (error) {
-      console.error('Failed to upvote', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const run = async (which, fn) => {
+        if (!fn) return;
+        setBusy(which);
+        try {
+            await fn();
+        } catch {
+            // the caller reports errors (toast)
+        } finally {
+            setBusy(null);
+        }
+    };
 
-  const handleDownvote = async () => {
-    setLoading(true);
-    try {
-      if (isDownvoted && onRemoveVote) {
-        await onRemoveVote();
-      } else {
-        await onDownvote();
-      }
-    } catch (error) {
-      console.error('Failed to downvote', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Clicking an active upvote removes it (Taiga's downvote).
+    const handleUp = () => run('up', isUpvoted ? (onRemoveVote || onDownvote) : onUpvote);
+    const handleDown = () => run('down', isDownvoted && onRemoveVote ? onRemoveVote : onDownvote);
 
-  return (
-    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-      <button
-        onClick={handleUpvote}
-        disabled={loading}
-        className="btn"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.25rem',
-          padding: '0.4rem 0.8rem',
-          background: isUpvoted ? 'rgba(52, 199, 89, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-          color: isUpvoted ? '#34C759' : 'var(--text-secondary)',
-          border: '1px solid ' + (isUpvoted ? '#34C759' : 'transparent'),
-          fontSize: '0.85rem'
-        }}
-        title="Upvote"
-      >
-        <FaThumbsUp />
-        {upvotesCount > 0 && <span>{upvotesCount}</span>}
-      </button>
+    const sizeClass = size === 'sm' ? 'btn-sm' : '';
+    const canDown = !!onDownvote && (isUpvoted || isDownvoted);
 
-      <button
-        onClick={handleDownvote}
-        disabled={loading}
-        className="btn"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.25rem',
-          padding: '0.4rem 0.8rem',
-          background: isDownvoted ? 'rgba(255, 59, 48, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-          color: isDownvoted ? '#FF3B30' : 'var(--text-secondary)',
-          border: '1px solid ' + (isDownvoted ? '#FF3B30' : 'transparent'),
-          fontSize: '0.85rem'
-        }}
-        title="Downvote"
-      >
-        <FaThumbsDown />
-        {downvotesCount > 0 && <span>{downvotesCount}</span>}
-      </button>
-    </div>
-  );
+    return (
+        <span className="split-btn">
+            <button
+                type="button"
+                className={`btn btn-secondary ${sizeClass} ${isUpvoted ? 'is-on' : ''}`}
+                onClick={handleUp}
+                disabled={disabled || busy !== null || (isUpvoted && !onRemoveVote && !onDownvote)}
+                aria-pressed={!!isUpvoted}
+                title={isUpvoted ? 'You upvoted this — click to remove your vote' : 'Upvote'}
+            >
+                {busy === 'up' ? <span className="spinner spinner-sm" /> : isUpvoted ? <FaThumbsUp /> : <FaRegThumbsUp />}
+                <span>{isUpvoted ? 'Upvoted' : 'Upvote'}</span>
+            </button>
+            {onCountClick ? (
+                <button
+                    type="button"
+                    className={`btn btn-secondary ${sizeClass} split-btn-count`}
+                    onClick={onCountClick}
+                    aria-expanded={!!countExpanded}
+                    aria-label={`${upvotesCount} vote${upvotesCount === 1 ? '' : 's'} — show voters`}
+                >
+                    {upvotesCount}
+                </button>
+            ) : (
+                <span className={`btn btn-secondary ${sizeClass} split-btn-count is-static`} aria-label={`${upvotesCount} votes`}>
+                    {upvotesCount}
+                </span>
+            )}
+            {onDownvote && (
+                <button
+                    type="button"
+                    className={`btn btn-secondary ${sizeClass} btn-icon ${isDownvoted ? 'is-on' : ''}`}
+                    onClick={handleDown}
+                    disabled={disabled || busy !== null || !canDown}
+                    aria-label="Downvote (remove your vote)"
+                    title="Downvote (remove your vote)"
+                >
+                    {busy === 'down' ? <span className="spinner spinner-sm" /> : <FaThumbsDown />}
+                    {downvotesCount > 0 && <span>{downvotesCount}</span>}
+                </button>
+            )}
+        </span>
+    );
 };
 
 export default VoteButtons;

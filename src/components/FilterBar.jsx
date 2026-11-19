@@ -1,223 +1,206 @@
-import React, { useState } from 'react';
-import { FaSearch, FaFilter, FaTimes } from 'react-icons/fa';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { FaSearch, FaTimes, FaChevronDown, FaCheck } from 'react-icons/fa';
+import { initials } from '../utils/format';
+import '../styles/planning.css';
 
-const FilterBar = ({ 
-  onSearch, 
-  onFilterChange, 
-  statuses = [], 
-  members = [],
-  showStatusFilter = true,
-  showAssigneeFilter = true,
-  showTagsFilter = true,
-  placeholder = "Search..."
+/*
+ * FilterBar — search box + filter chips (each a dropdown of options with counts) + "Clear all".
+ *
+ *   <FilterBar
+ *     search={q} onSearchChange={setQ} searchPlaceholder="Search stories…"
+ *     filters={[{ key: 'status', label: 'Status', options: [{ value: 1, label: 'New', count: 4, color: '#hex' }] }]}
+ *     values={{ status: [1] }} onChange={setValues}
+ *   >{extra controls on the right}</FilterBar>
+ *
+ * Option shape: { value, label, count?, color?, user? (Taiga user → avatar) }.
+ * `values` maps filter key -> array of selected option values.
+ */
+
+const FilterChip = ({ filter, selected, onToggle, onClearKey }) => {
+    const [open, setOpen] = useState(false);
+    const [term, setTerm] = useState('');
+    const rootRef = useRef(null);
+    const listId = useId();
+
+    useEffect(() => {
+        if (!open) return undefined;
+        const onDown = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false); };
+        const onKey = (e) => { if (e.key === 'Escape') { setOpen(false); rootRef.current?.querySelector('button')?.focus(); } };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('mousedown', onDown);
+            document.removeEventListener('keydown', onKey);
+        };
+    }, [open]);
+
+    const options = filter.options || [];
+    const shown = term
+        ? options.filter((o) => String(o.label).toLowerCase().includes(term.toLowerCase()))
+        : options;
+    const selectedSet = new Set(selected.map(String));
+    const active = selected.length > 0;
+    const firstLabel = active ? options.find((o) => selectedSet.has(String(o.value)))?.label : null;
+
+    return (
+        <div className="fb-chip-wrap" ref={rootRef}>
+            <button
+                type="button"
+                className={`fb-chip ${active ? 'is-active' : ''}`}
+                aria-haspopup="listbox"
+                aria-expanded={open}
+                aria-controls={open ? listId : undefined}
+                onClick={() => setOpen((o) => !o)}
+            >
+                {filter.icon && <span className="fb-chip-icon">{filter.icon}</span>}
+                <span>{filter.label}</span>
+                {active && (
+                    <span className="fb-chip-value">
+                        {firstLabel || selected.length}
+                        {selected.length > 1 && <span className="fb-chip-more">+{selected.length - 1}</span>}
+                    </span>
+                )}
+                <FaChevronDown size={9} className="fb-chip-caret" />
+            </button>
+            {open && (
+                <div className="popover fb-popover" role="listbox" id={listId} aria-multiselectable="true" aria-label={filter.label}>
+                    {options.length > 7 && (
+                        <div className="fb-popover-search">
+                            <FaSearch size={11} />
+                            <input
+                                autoFocus
+                                value={term}
+                                onChange={(e) => setTerm(e.target.value)}
+                                placeholder={`Filter ${filter.label.toLowerCase()}…`}
+                                aria-label={`Filter ${filter.label} options`}
+                            />
+                        </div>
+                    )}
+                    <div className="fb-options">
+                        {shown.length === 0 && <div className="fb-empty">No options</div>}
+                        {shown.map((o, i) => {
+                            const on = selectedSet.has(String(o.value));
+                            return (
+                                <button
+                                    key={String(o.value)}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={on}
+                                    className={`fb-option ${on ? 'is-on' : ''}`}
+                                    onClick={() => onToggle(o.value)}
+                                    autoFocus={options.length <= 7 && i === 0}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                                            e.preventDefault();
+                                            const sib = e.key === 'ArrowDown' ? e.currentTarget.nextElementSibling : e.currentTarget.previousElementSibling;
+                                            sib?.focus();
+                                        }
+                                    }}
+                                >
+                                    <span className="fb-check">{on && <FaCheck size={9} />}</span>
+                                    {o.user !== undefined ? (
+                                        <span className="avatar avatar-xs">{o.user?.photo ? <img src={o.user.photo} alt="" /> : initials(o.label)}</span>
+                                    ) : o.color ? (
+                                        <span className="dot" style={{ background: o.color }} />
+                                    ) : null}
+                                    <span className="fb-option-label">{o.label}</span>
+                                    {o.count !== undefined && o.count !== null && <span className="fb-option-count">{o.count}</span>}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {active && (
+                        <div className="fb-popover-footer">
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => onClearKey(filter.key)}>Clear {filter.label.toLowerCase()}</button>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const FilterBar = ({
+    search = '',
+    onSearchChange,
+    searchPlaceholder = 'Search…',
+    filters = [],
+    values = {},
+    onChange,
+    onClearAll,
+    children,
+    className = '',
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('');
-  const [selectedAssignee, setSelectedAssignee] = useState('');
-  const [tagFilter, setTagFilter] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
+    const searchRef = useRef(null);
+    const active = useMemo(() => Object.values(values).some((v) => Array.isArray(v) && v.length), [values]);
 
-  const handleSearchChange = (e) => {
-    const value = e.target.value;
-    setSearchTerm(value);
-    if (onSearch) onSearch(value);
-  };
+    // "/" focuses the search box (unless already typing somewhere)
+    useEffect(() => {
+        if (!onSearchChange) return undefined;
+        const onKey = (e) => {
+            if (e.key !== '/' || e.ctrlKey || e.metaKey) return;
+            const t = e.target;
+            if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
+            e.preventDefault();
+            searchRef.current?.focus();
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [onSearchChange]);
 
-  const handleStatusChange = (e) => {
-    const value = e.target.value;
-    setSelectedStatus(value);
-    if (onFilterChange) {
-      onFilterChange({
-        status: value,
-        assignee: selectedAssignee,
-        tag: tagFilter
-      });
-    }
-  };
+    const toggle = (key, value) => {
+        const cur = values[key] || [];
+        const exists = cur.some((v) => String(v) === String(value));
+        onChange?.({ ...values, [key]: exists ? cur.filter((v) => String(v) !== String(value)) : [...cur, value] });
+    };
+    const clearKey = (key) => onChange?.({ ...values, [key]: [] });
+    const clearAll = () => {
+        if (onClearAll) onClearAll();
+        else {
+            onChange?.(Object.fromEntries(Object.keys(values).map((k) => [k, []])));
+            onSearchChange?.('');
+        }
+    };
 
-  const handleAssigneeChange = (e) => {
-    const value = e.target.value;
-    setSelectedAssignee(value);
-    if (onFilterChange) {
-      onFilterChange({
-        status: selectedStatus,
-        assignee: value,
-        tag: tagFilter
-      });
-    }
-  };
-
-  const handleTagChange = (e) => {
-    const value = e.target.value;
-    setTagFilter(value);
-    if (onFilterChange) {
-      onFilterChange({
-        status: selectedStatus,
-        assignee: selectedAssignee,
-        tag: value
-      });
-    }
-  };
-
-  const clearFilters = () => {
-    setSearchTerm('');
-    setSelectedStatus('');
-    setSelectedAssignee('');
-    setTagFilter('');
-    if (onSearch) onSearch('');
-    if (onFilterChange) {
-      onFilterChange({
-        status: '',
-        assignee: '',
-        tag: ''
-      });
-    }
-  };
-
-  const hasActiveFilters = selectedStatus || selectedAssignee || tagFilter || searchTerm;
-
-  return (
-    <div style={{ marginBottom: '1.5rem' }}>
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
-        {/* Search Input */}
-        <div style={{ flex: 1, position: 'relative' }}>
-          <FaSearch style={{ 
-            position: 'absolute', 
-            left: '1rem', 
-            top: '50%', 
-            transform: 'translateY(-50%)',
-            color: 'var(--text-secondary)',
-            fontSize: '0.9rem'
-          }} />
-          <input
-            type="text"
-            className="input-field"
-            value={searchTerm}
-            onChange={handleSearchChange}
-            placeholder={placeholder}
-            style={{ paddingLeft: '2.5rem' }}
-          />
-        </div>
-
-        {/* Filter Toggle Button */}
-        <button 
-          onClick={() => setShowFilters(!showFilters)}
-          className="btn"
-          style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '0.5rem',
-            background: showFilters ? 'var(--primary)' : 'var(--bg-secondary)'
-          }}
-        >
-          <FaFilter /> Filters
-        </button>
-
-        {/* Clear Filters */}
-        {hasActiveFilters && (
-          <button 
-            onClick={clearFilters}
-            className="btn"
-            style={{ 
-              background: 'rgba(255, 59, 48, 0.1)', 
-              color: 'var(--error)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            <FaTimes /> Clear
-          </button>
-        )}
-      </div>
-
-      {/* Filter Dropdowns */}
-      {showFilters && (
-        <div style={{ 
-          padding: '1rem', 
-          background: 'var(--bg-secondary)', 
-          borderRadius: '8px',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: '1rem'
-        }}>
-          {showStatusFilter && statuses.length > 0 && (
-            <div>
-              <label style={{ 
-                display: 'block', 
-                marginBottom: '0.5rem', 
-                fontSize: '0.85rem',
-                color: 'var(--text-secondary)'
-              }}>
-                Status
-              </label>
-              <select
-                className="input-field"
-                value={selectedStatus}
-                onChange={handleStatusChange}
-                style={{ width: '100%', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
-              >
-                <option value="">All Statuses</option>
-                {statuses.map(status => (
-                  <option key={status.id} value={status.id}>
-                    {status.name}
-                  </option>
+    return (
+        <div className={`fb ${className}`}>
+            {onSearchChange && (
+                <div className="fb-search">
+                    <FaSearch size={12} aria-hidden="true" />
+                    <input
+                        ref={searchRef}
+                        type="search"
+                        value={search}
+                        onChange={(e) => onSearchChange(e.target.value)}
+                        placeholder={searchPlaceholder}
+                        aria-label={searchPlaceholder}
+                    />
+                    {search ? (
+                        <button type="button" className="fb-search-clear" onClick={() => onSearchChange('')} aria-label="Clear search"><FaTimes size={10} /></button>
+                    ) : (
+                        <span className="kbd fb-kbd" aria-hidden="true">/</span>
+                    )}
+                </div>
+            )}
+            <div className="fb-chips">
+                {filters.map((f) => (
+                    <FilterChip
+                        key={f.key}
+                        filter={f}
+                        selected={values[f.key] || []}
+                        onToggle={(v) => toggle(f.key, v)}
+                        onClearKey={clearKey}
+                    />
                 ))}
-              </select>
+                {(active || search) && (
+                    <button type="button" className="btn btn-ghost btn-sm fb-clear" onClick={clearAll}>
+                        <FaTimes size={10} /> Clear all
+                    </button>
+                )}
             </div>
-          )}
-
-          {showAssigneeFilter && members.length > 0 && (
-            <div>
-              <label style={{ 
-                display: 'block', 
-                marginBottom: '0.5rem', 
-                fontSize: '0.85rem',
-                color: 'var(--text-secondary)'
-              }}>
-                Assigned To
-              </label>
-              <select
-                className="input-field"
-                value={selectedAssignee}
-                onChange={handleAssigneeChange}
-                style={{ width: '100%', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
-              >
-                <option value="">All Members</option>
-                <option value="unassigned">Unassigned</option>
-                {members.map(member => (
-                  <option key={member.id} value={member.user}>
-                    {member.full_name || member.user_email}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {showTagsFilter && (
-            <div>
-              <label style={{ 
-                display: 'block', 
-                marginBottom: '0.5rem', 
-                fontSize: '0.85rem',
-                color: 'var(--text-secondary)'
-              }}>
-                Tag
-              </label>
-              <input
-                type="text"
-                className="input-field"
-                value={tagFilter}
-                onChange={handleTagChange}
-                placeholder="Filter by tag..."
-                style={{ width: '100%' }}
-              />
-            </div>
-          )}
+            {children && <div className="fb-extra">{children}</div>}
         </div>
-      )}
-    </div>
-  );
+    );
 };
 
 export default FilterBar;

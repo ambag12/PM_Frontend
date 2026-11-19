@@ -1,395 +1,269 @@
-import React, { useState, useEffect } from 'react';
-import client from '../api/client';
-import WatchButton from './WatchButton';
-import { FaTimes, FaEdit, FaTrash, FaSave, FaChartLine, FaTasks, FaList } from 'react-icons/fa';
+import React, { useCallback, useContext, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+    FaCalendarAlt, FaEdit, FaTrash, FaEye, FaEyeSlash, FaLock, FaLockOpen, FaColumns, FaChartLine,
+    FaTasks, FaBookOpen, FaBullseye, FaFlask,
+} from 'react-icons/fa';
+import { milestoneService, taskService } from '../api/services';
+import { useProject } from '../context/ProjectContext';
+import { usePermissions } from '../context/PermissionContext';
+import { useToast, useConfirm } from '../context/ToastContext';
+import { AuthContext } from '../context/AuthContext';
+import { Button, Loader, Ring, EmptyState } from './UI';
+import TaskDetail from './TaskDetail';
+import UserStoryDetail from './UserStoryDetail';
+import CreateTaskModal from './CreateTaskModal';
+import BurndownChart from './planning/BurndownChart';
+import TaskBoard from './planning/TaskBoard';
+import { ALL, useRemote, sumDict, fmtPoints, dateRange, sprintState } from './planning/utils';
+import { percent } from '../utils/format';
+import '../styles/planning.css';
 
-const MilestoneDetail = ({ milestoneId, onClose, onUpdate, onDelete }) => {
-  const [milestone, setMilestone] = useState(null);
-  const [stats, setStats] = useState(null);
-  const [tasks, setTasks] = useState([]);
-  const [userStories, setUserStories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [formData, setFormData] = useState({});
-  const [error, setError] = useState('');
+/*
+ * MilestoneDetail — one sprint: header + actions, KPIs, burndown and the taskboard.
+ *   <MilestoneDetail projectId sprintId refreshKey? onEdit(sprint) onChanged(sprint) onDeleted() />
+ */
+const MilestoneDetail = ({ projectId, sprintId, refreshKey = 0, onEdit, onChanged, onDeleted }) => {
+    const { project } = useProject();
+    const { canModify, canDelete, canAdd } = usePermissions();
+    const { user } = useContext(AuthContext) || {};
+    const toast = useToast();
+    const confirm = useConfirm();
 
-  useEffect(() => {
-    fetchMilestoneDetails();
-    fetchMilestoneStats();
-    fetchMilestoneItems();
-  }, [milestoneId]);
+    const fetchSprint = useCallback(() => milestoneService.get(sprintId).then((r) => ({ ...r.data, refreshKey })), [sprintId, refreshKey]);
+    const sprintR = useRemote(fetchSprint);
+    const fetchStats = useCallback(() => milestoneService.getStats(sprintId).then((r) => ({ ...r.data, refreshKey })), [sprintId, refreshKey]);
+    const statsR = useRemote(fetchStats);
+    const fetchTasks = useCallback(() => taskService.list({ project: projectId, milestone: sprintId, ...ALL }).then((r) => r.data), [projectId, sprintId]);
+    const tasksR = useRemote(fetchTasks);
+    const fetchWatchers = useCallback(() => milestoneService.getWatchers(sprintId).then((r) => r.data), [sprintId]);
+    const watchersR = useRemote(fetchWatchers);
 
-  const fetchMilestoneDetails = async () => {
-    try {
-      const response = await client.get(`milestones/${milestoneId}`);
-      setMilestone(response.data);
-      setFormData({
-        name: response.data.name,
-        estimated_start: response.data.estimated_start || '',
-        estimated_finish: response.data.estimated_finish || '',
-      });
-    } catch (err) {
-      console.error("Failed to fetch milestone", err);
-      setError("Could not load milestone.");
-    } finally {
-      setLoading(false);
+    const [openItem, setOpenItem] = useState(null); // { type, id }
+    const [addTaskFor, setAddTaskFor] = useState(undefined); // story | null (no story) | undefined (closed)
+    const [busy, setBusy] = useState('');
+
+    const sprint = sprintR.data;
+    const stats = statsR.data;
+    const tasks = tasksR.data || [];
+    const statuses = [...(project?.task_statuses || [])].sort((a, b) => a.order - b.order);
+    const stories = [...(sprint?.user_stories || [])].sort((a, b) => (a.sprint_order ?? 0) - (b.sprint_order ?? 0));
+    const watchers = watchersR.data || [];
+    const isWatching = !!user && watchers.some((w) => (w.id ?? w) === user.id);
+
+    const refreshBoard = useCallback(() => {
+        sprintR.refresh();
+        statsR.refresh();
+        tasksR.refresh();
+    }, [sprintR, statsR, tasksR]);
+
+    const moveTask = async (task, statusId, storyId, neighbour) => {
+        // optimistic: compute the new arrangement from the current list
+        const moved = { ...task, status: statusId, user_story: storyId };
+        const sorted = (tasksR.data || [])
+            .filter((t) => t.id !== task.id)
+            .sort((a, b) => (a.taskboard_order ?? 0) - (b.taskboard_order ?? 0) || a.id - b.id);
+        let at = sorted.length;
+        if (neighbour?.before) at = sorted.findIndex((t) => t.id === neighbour.before);
+        else if (neighbour?.after) at = sorted.findIndex((t) => t.id === neighbour.after) + 1;
+        if (at < 0) at = sorted.length;
+        const nextList = [...sorted.slice(0, at), moved, ...sorted.slice(at)].map((t, i) => ({ ...t, taskboard_order: i + 1 }));
+        tasksR.setData(nextList);
+        try {
+            const changed = task.status !== statusId || (task.user_story ?? null) !== (storyId ?? null);
+            if (changed) {
+                await taskService.update(task.id, { status: statusId, user_story: storyId, version: task.version });
+                const st = statuses.find((s) => s.id === statusId);
+                toast.success(`Task #${task.ref} → ${st?.name || 'moved'}`);
+            }
+            if (neighbour) {
+                const cell = nextList.filter((t) => t.status === statusId && (t.user_story ?? null) === (storyId ?? null));
+                await taskService.bulkUpdateTaskboardOrder(Number(projectId), cell.map((t, i) => ({ task_id: t.id, order: i + 1 })), { status_id: statusId, milestone_id: Number(sprintId) });
+            }
+        } catch (err) {
+            toast.error(err);
+        } finally {
+            refreshBoard();
+        }
+    };
+
+    const toggleWatch = async () => {
+        setBusy('watch');
+        try {
+            if (isWatching) await milestoneService.unwatch(sprintId); else await milestoneService.watch(sprintId);
+            toast.success(isWatching ? 'You stopped watching this sprint' : 'You are now watching this sprint');
+            watchersR.refresh();
+        } catch (err) {
+            toast.error(err);
+        } finally {
+            setBusy('');
+        }
+    };
+
+    const toggleClosed = async () => {
+        const closing = !sprint.closed;
+        if (closing && !(await confirm({
+            title: 'Close sprint?',
+            message: `“${sprint.name}” will move to closed sprints. Open stories stay in it until you move them.`,
+            confirmText: 'Close sprint',
+        }))) return;
+        setBusy('close');
+        try {
+            const res = await milestoneService.update(sprint.id, { closed: closing });
+            toast.success(closing ? 'Sprint closed' : 'Sprint reopened');
+            sprintR.refresh();
+            onChanged?.(res.data);
+        } catch (err) {
+            toast.error(err);
+        } finally {
+            setBusy('');
+        }
+    };
+
+    const remove = async () => {
+        if (!(await confirm({
+            title: 'Delete sprint?',
+            message: `“${sprint.name}” will be deleted. Its ${stories.length} stories return to the backlog. This cannot be undone.`,
+            confirmText: 'Delete sprint',
+            danger: true,
+        }))) return;
+        setBusy('delete');
+        try {
+            await milestoneService.delete(sprint.id);
+            toast.success('Sprint deleted');
+            onDeleted?.(sprint);
+        } catch (err) {
+            toast.error(err);
+            setBusy('');
+        }
+    };
+
+    if (sprintR.error && !sprint) {
+        return <EmptyState title="Sprint not found" description="It may have been deleted." />;
     }
-  };
+    if (!sprint) return <Loader label="Loading sprint…" />;
 
-  const fetchMilestoneStats = async () => {
-    try {
-      const response = await client.get(`milestones/${milestoneId}/stats`);
-      setStats(response.data);
-    } catch (err) {
-      console.error("Failed to fetch milestone stats", err);
-    }
-  };
+    const totalPts = stats ? sumDict(stats.total_points) : 0;
+    const donePts = stats ? sumDict(stats.completed_points) : 0;
+    const progress = totalPts > 0 ? percent(donePts, totalPts) : percent(stats?.completed_tasks, stats?.total_tasks);
+    const state = sprintState(sprint);
+    const canEdit = canModify('milestone');
 
-  const fetchMilestoneItems = async () => {
-    try {
-      const tasksRes = await client.get(`tasks?milestone=${milestoneId}`);
-      setTasks(tasksRes.data);
-
-      const storiesRes = await client.get(`userstories?milestone=${milestoneId}`);
-      setUserStories(storiesRes.data);
-    } catch (err) {
-      console.error("Failed to fetch milestone items", err);
-    }
-  };
-
-  const handleUpdate = async () => {
-    setError('');
-    try {
-      const payload = {
-        name: formData.name,
-        estimated_start: formData.estimated_start,
-        estimated_finish: formData.estimated_finish,
-        version: milestone.version,
-      };
-
-      const response = await client.patch(`milestones/${milestoneId}`, payload);
-      setMilestone(response.data);
-      setEditing(false);
-      if (onUpdate) onUpdate();
-    } catch (err) {
-      console.error("Failed to update milestone", err);
-      setError(err.response?.data?._error_message || "Failed to update milestone.");
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!window.confirm("Are you sure you want to delete this milestone?")) return;
-
-    try {
-      await client.delete(`milestones/${milestoneId}`);
-      if (onDelete) onDelete();
-      onClose();
-    } catch (err) {
-      console.error("Failed to delete milestone", err);
-      setError("Failed to delete milestone.");
-    }
-  };
-
-  const handleWatch = async () => {
-    try {
-      await client.post(`milestones/${milestoneId}/watch`);
-      fetchMilestoneDetails();
-    } catch (err) {
-      console.error("Failed to watch milestone", err);
-    }
-  };
-
-  const handleUnwatch = async () => {
-    try {
-      await client.post(`milestones/${milestoneId}/unwatch`);
-      fetchMilestoneDetails();
-    } catch (err) {
-      console.error("Failed to unwatch milestone", err);
-    }
-  };
-
-  if (loading) return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.7)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }}>
-      <div className="card">Loading...</div>
-    </div>
-  );
-
-  const completionPercentage = stats ? Math.round((stats.completed_points / stats.total_points) * 100) || 0 : 0;
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.7)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: '1rem',
-      overflowY: 'auto'
-    }}>
-      <div className="card" style={{ maxWidth: '900px', width: '100%', position: 'relative', margin: '2rem auto' }}>
-        <button 
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: '1rem',
-            right: '1rem',
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: '1.2rem',
-            zIndex: 1001
-          }}
-        >
-          <FaTimes />
-        </button>
-
-        {error && (
-          <div style={{ 
-            background: 'rgba(255, 59, 48, 0.1)', 
-            border: '1px solid var(--error)', 
-            color: 'var(--error)', 
-            padding: '1rem', 
-            borderRadius: '8px',
-            marginBottom: '1.5rem'
-          }}>
-            {error}
-          </div>
-        )}
-
-        <div style={{ marginBottom: '2rem' }}>
-          {editing ? (
-            <input
-              type="text"
-              className="input-field"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              style={{ fontSize: '1.5rem', fontWeight: '600', marginBottom: '1rem' }}
-            />
-          ) : (
-            <h2 style={{ marginBottom: '1rem' }}>{milestone?.name}</h2>
-          )}
-
-          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-            {milestone?.slug && (
-              <span style={{ 
-                background: 'rgba(10, 132, 255, 0.1)',
-                color: 'var(--primary)',
-                padding: '0.5rem 1rem',
-                borderRadius: '20px',
-                fontSize: '0.85rem'
-              }}>
-                {milestone.slug}
-              </span>
-            )}
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center' }}>
-              📅 {milestone?.estimated_start} → {milestone?.estimated_finish}
-            </span>
-          </div>
-        </div>
-
-        {/* Stats Section */}
-        {stats && (
-          <div style={{ marginBottom: '2rem' }}>
-            <h4 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <FaChartLine /> Sprint Progress
-            </h4>
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-              gap: '1rem',
-              marginBottom: '1rem'
-            }}>
-              <div style={{ background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Total Tasks</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{stats.total_tasks || 0}</div>
-              </div>
-              <div style={{ background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Completed</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)' }}>{stats.completed_tasks || 0}</div>
-              </div>
-              <div style={{ background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>User Stories</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{stats.total_userstories || 0}</div>
-              </div>
-              <div style={{ background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Completion</div>
-                <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)' }}>{completionPercentage}%</div>
-              </div>
-            </div>
-
-            {/* Progress Bar */}
-            <div style={{ 
-              background: 'var(--bg-secondary)', 
-              borderRadius: '10px', 
-              height: '20px', 
-              overflow: 'hidden',
-              marginBottom: '1rem'
-            }}>
-              <div style={{ 
-                background: 'linear-gradient(90deg, var(--primary), var(--success))', 
-                height: '100%', 
-                width: `${completionPercentage}%`,
-                transition: 'width 0.3s ease'
-              }}></div>
-            </div>
-          </div>
-        )}
-
-        {editing && (
-          <>
-            <div className="input-group">
-              <label className="input-label">Estimated Start Date</label>
-              <input
-                type="date"
-                className="input-field"
-                value={formData.estimated_start}
-                onChange={(e) => setFormData({ ...formData, estimated_start: e.target.value })}
-              />
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Estimated Finish Date</label>
-              <input
-                type="date"
-                className="input-field"
-                value={formData.estimated_finish}
-                onChange={(e) => setFormData({ ...formData, estimated_finish: e.target.value })}
-              />
-            </div>
-          </>
-        )}
-
-        {/* User Stories Section */}
-        <div style={{ marginBottom: '2rem' }}>
-          <h4 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <FaList /> User Stories ({userStories.length})
-          </h4>
-          {userStories.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No user stories in this milestone.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {userStories.slice(0, 5).map(story => (
-                <div key={story.id} style={{ 
-                  background: 'var(--bg-secondary)', 
-                  padding: '0.75rem', 
-                  borderRadius: '6px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}>
-                  <span style={{ fontSize: '0.9rem' }}>
-                    <span style={{ color: 'var(--primary)', fontWeight: 'bold', marginRight: '0.5rem' }}>#{story.ref}</span>
-                    {story.subject}
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    {story.status_extra_info?.name}
-                  </span>
+    return (
+        <div className="pl-sprint-detail stack">
+            <section className="card pl-sd-head">
+                <div className="pl-sd-title-row">
+                    <div className="flex-1">
+                        <div className="row gap-2 flex-wrap">
+                            <h2 className="pl-sd-title">{sprint.name}</h2>
+                            <span className={`badge tone-${state.tone} pl-tone-badge`}>{state.label}</span>
+                        </div>
+                        <div className="pl-sd-dates"><FaCalendarAlt size={11} /> {dateRange(sprint.estimated_start, sprint.estimated_finish)}</div>
+                    </div>
+                    <div className="pl-sd-actions">
+                        <Button size="sm" variant="secondary" className={isWatching ? 'is-on' : ''} icon={isWatching ? <FaEyeSlash /> : <FaEye />} onClick={toggleWatch} loading={busy === 'watch'} aria-pressed={isWatching}>
+                            {isWatching ? 'Unwatch' : 'Watch'}{watchers.length ? ` · ${watchers.length}` : ''}
+                        </Button>
+                        {canEdit && <Button size="sm" variant="secondary" icon={<FaEdit />} onClick={() => onEdit?.(sprint)}>Edit</Button>}
+                        {canEdit && (
+                            <Button size="sm" variant="secondary" icon={sprint.closed ? <FaLockOpen /> : <FaLock />} onClick={toggleClosed} loading={busy === 'close'}>
+                                {sprint.closed ? 'Reopen' : 'Close sprint'}
+                            </Button>
+                        )}
+                        {canDelete('milestone') && <Button size="sm" variant="danger-ghost" icon={<FaTrash />} onClick={remove} loading={busy === 'delete'} aria-label="Delete sprint" />}
+                    </div>
                 </div>
-              ))}
-              {userStories.length > 5 && (
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                  +{userStories.length - 5} more
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Tasks Section */}
-        <div style={{ marginBottom: '2rem' }}>
-          <h4 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <FaTasks /> Tasks ({tasks.length})
-          </h4>
-          {tasks.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No tasks in this milestone.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {tasks.slice(0, 5).map(task => (
-                <div key={task.id} style={{ 
-                  background: 'var(--bg-secondary)', 
-                  padding: '0.75rem', 
-                  borderRadius: '6px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}>
-                  <span style={{ fontSize: '0.9rem' }}>
-                    <span style={{ color: 'var(--secondary)', fontWeight: 'bold', marginRight: '0.5rem' }}>#{task.ref}</span>
-                    {task.subject}
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    {task.status_extra_info?.name}
-                  </span>
+                <div className="pl-sd-kpis">
+                    <div className="pl-sd-ring tone-success">
+                        <Ring value={progress} size={64} tone="success" />
+                        <div>
+                            <div className="pl-kpi-label">Completed</div>
+                            <div className="text-xs text-muted">{totalPts > 0 ? 'by points' : 'by tasks'}</div>
+                        </div>
+                    </div>
+                    <div className="pl-sd-kpi"><FaBullseye className="pl-sd-kpi-icon tone-primary" /><div><div className="pl-kpi-value">{fmtPoints(donePts)}<span className="pl-kpi-of">/{fmtPoints(totalPts)}</span></div><div className="pl-kpi-label">Points done</div></div></div>
+                    <div className="pl-sd-kpi"><FaBookOpen className="pl-sd-kpi-icon tone-info" /><div><div className="pl-kpi-value">{stats?.completed_userstories ?? '–'}<span className="pl-kpi-of">/{stats?.total_userstories ?? stories.length}</span></div><div className="pl-kpi-label">Stories closed</div></div></div>
+                    <div className="pl-sd-kpi"><FaTasks className="pl-sd-kpi-icon tone-accent" /><div><div className="pl-kpi-value">{stats?.completed_tasks ?? '–'}<span className="pl-kpi-of">/{stats?.total_tasks ?? tasks.length}</span></div><div className="pl-kpi-label">Tasks closed</div></div></div>
+                    <div className="pl-sd-kpi"><FaFlask className="pl-sd-kpi-icon tone-warning" /><div><div className="pl-kpi-value">{stats?.iocaine_doses ?? 0}</div><div className="pl-kpi-label">Iocaine doses</div></div></div>
                 </div>
-              ))}
-              {tasks.length > 5 && (
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                  +{tasks.length - 5} more
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+            </section>
 
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          paddingTop: '1.5rem',
-          borderTop: '1px solid var(--border-color)',
-          gap: '1rem',
-          flexWrap: 'wrap'
-        }}>
-          <WatchButton
-            isWatching={milestone?.is_watcher}
-            watchersCount={milestone?.total_watchers}
-            onWatch={handleWatch}
-            onUnwatch={handleUnwatch}
-            resourceType="milestone"
-          />
+            <section className="card">
+                <div className="card-header">
+                    <h3 className="card-title row gap-2"><FaChartLine className="text-primary-color" /> Burndown</h3>
+                    {stats && <span className="text-sm text-muted tabular">{fmtPoints(totalPts - donePts)} of {fmtPoints(totalPts)} pts open</span>}
+                </div>
+                {!stats ? <Loader label="" /> : <BurndownChart days={stats.days || []} />}
+            </section>
 
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            {editing ? (
-              <>
-                <button onClick={handleUpdate} className="btn btn-primary">
-                  <FaSave /> Save
-                </button>
-                <button onClick={() => setEditing(false)} className="btn" style={{ background: 'var(--bg-secondary)' }}>
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                <button onClick={() => setEditing(true)} className="btn">
-                  <FaEdit /> Edit
-                </button>
-                <button onClick={handleDelete} className="btn" style={{ background: 'rgba(255, 59, 48, 0.1)', color: 'var(--error)' }}>
-                  <FaTrash /> Delete
-                </button>
-              </>
+            <section className="card flush">
+                <div className="card-header">
+                    <h3 className="card-title row gap-2"><FaColumns className="text-primary-color" /> Taskboard</h3>
+                    <div className="row">
+                        {tasksR.loading && tasksR.data && <span className="spinner spinner-sm" aria-label="Updating" />}
+                        <Link className="btn btn-ghost btn-sm" to={`/project/${projectId}/backlog`}>Plan in backlog</Link>
+                        {canAdd('task') && <Button size="sm" icon={<FaTasks />} onClick={() => setAddTaskFor(stories[0] || null)}>New task</Button>}
+                    </div>
+                </div>
+                {!tasksR.data && !tasksR.error ? (
+                    <Loader label="Loading tasks…" />
+                ) : stories.length === 0 && tasks.length === 0 ? (
+                    <EmptyState
+                        icon={<FaColumns />}
+                        title="Nothing planned yet"
+                        description="Drag user stories into this sprint from the backlog, then break them down into tasks here."
+                        action={<Link className="btn btn-primary" to={`/project/${projectId}/backlog`}>Open backlog</Link>}
+                    />
+                ) : (
+                    <div className="pl-tb-scroll">
+                        <TaskBoard
+                            statuses={statuses}
+                            stories={stories}
+                            tasks={tasks}
+                            points={project?.points || []}
+                            canEdit={canModify('task')}
+                            canAdd={canAdd('task') && !sprint.closed}
+                            onOpenTask={(t) => setOpenItem({ type: 'task', id: t.id })}
+                            onOpenStory={(s) => setOpenItem({ type: 'story', id: s.id })}
+                            onAddTask={(story) => setAddTaskFor(story)}
+                            onMove={moveTask}
+                        />
+                    </div>
+                )}
+                {canModify('task') && tasks.length > 0 && (
+                    <div className="pl-list-foot text-xs text-muted">Drag tasks between columns · focus a task and press <span className="kbd">Alt</span>+<span className="kbd">←</span>/<span className="kbd">→</span> to change its status</div>
+                )}
+            </section>
+
+            {openItem?.type === 'task' && (
+                <TaskDetail
+                    taskId={openItem.id}
+                    projectId={projectId}
+                    onClose={() => setOpenItem(null)}
+                    onUpdate={refreshBoard}
+                    onDelete={() => { setOpenItem(null); refreshBoard(); }}
+                />
             )}
-          </div>
+            {openItem?.type === 'story' && (
+                <UserStoryDetail
+                    storyId={openItem.id}
+                    projectId={projectId}
+                    onClose={() => setOpenItem(null)}
+                    onUpdate={refreshBoard}
+                    onDelete={() => { setOpenItem(null); refreshBoard(); }}
+                />
+            )}
+            {addTaskFor !== undefined && (
+                <CreateTaskModal
+                    projectId={projectId}
+                    userStoryId={addTaskFor?.id ?? undefined}
+                    milestoneId={Number(sprintId)}
+                    onClose={() => setAddTaskFor(undefined)}
+                    onTaskCreated={() => { setAddTaskFor(undefined); refreshBoard(); }}
+                />
+            )}
         </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 export default MilestoneDetail;

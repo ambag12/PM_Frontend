@@ -1,293 +1,147 @@
-import React, { useState, useEffect } from 'react';
-import client from '../api/client';
-import { FaTimes } from 'react-icons/fa';
+import React, { useId, useRef, useState } from 'react';
+import { issueService } from '../api/services';
+import { getErrorMessage } from '../api/client';
+import { useToast } from '../context/ToastContext';
+import { Modal, Field, Loader } from './UI';
+import TagEditor from './work/TagEditor';
+import { CreateFooter, CreatedNote } from './work/FormBits';
+import { useProjectData } from './work/useWorkItem';
+import { memberOptions, statusOptions } from './work/workTypes';
 
-const CreateIssueModal = ({ projectId, onClose, onIssueCreated }) => {
-  const [types, setTypes] = useState([]);
-  const [statuses, setStatuses] = useState([]);
-  const [priorities, setPriorities] = useState([]);
-  const [severities, setSeverities] = useState([]);
-  const [members, setMembers] = useState([]);
-  const [formData, setFormData] = useState({
-    subject: '',
-    description: '',
-    type: '',
-    status: '',
-    priority: '',
-    severity: '',
-    assigned_to: '',
-    tags: '',
-  });
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+const firstId = (list) => [...(list || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))[0]?.id ?? '';
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [typesRes, statusesRes, prioritiesRes, severitiesRes, membersRes] = await Promise.all([
-          client.get(`issue-types?project=${projectId}`),
-          client.get(`issue-statuses?project=${projectId}`),
-          client.get(`priorities?project=${projectId}`),
-          client.get(`severities?project=${projectId}`),
-          client.get(`memberships?project=${projectId}`)
-        ]);
+const IssueForm = ({ project, projectId, formId, setBusy, onIssueCreated, onClose }) => {
+    const toast = useToast();
+    const subjectRef = useRef(null);
+    const [form, setForm] = useState(() => ({
+        subject: '',
+        description: '',
+        type: project.default_issue_type ?? firstId(project.issue_types),
+        severity: project.default_severity ?? firstId(project.severities),
+        priority: project.default_priority ?? firstId(project.priorities),
+        status: project.default_issue_status ?? firstId(project.issue_statuses),
+        assigned_to: '',
+        tags: [],
+        due_date: '',
+    }));
+    const [errors, setErrors] = useState({});
+    const [apiError, setApiError] = useState('');
+    const [created, setCreated] = useState('');
+    const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-        setTypes(typesRes.data);
-        setStatuses(statusesRes.data);
-        setPriorities(prioritiesRes.data);
-        setSeverities(severitiesRes.data);
-        setMembers(membersRes.data);
-
-        // Set defaults
-        if (typesRes.data.length > 0) {
-          setFormData(prev => ({ ...prev, type: typesRes.data[0].id }));
+    const submit = async (e) => {
+        e.preventDefault();
+        const another = e.nativeEvent?.submitter?.value === 'another';
+        const subject = form.subject.trim();
+        if (!subject) {
+            setErrors({ subject: 'Describe the issue in a short subject.' });
+            subjectRef.current?.focus();
+            return;
         }
-        if (statusesRes.data.length > 0) {
-          setFormData(prev => ({ ...prev, status: statusesRes.data[0].id }));
+        setErrors({});
+        setApiError('');
+        setBusy(true);
+        try {
+            const num = (v) => (v === '' || v === null || v === undefined ? undefined : Number(v));
+            const res = await issueService.create({
+                project: Number(projectId),
+                subject,
+                description: form.description,
+                type: num(form.type),
+                severity: num(form.severity),
+                priority: num(form.priority),
+                status: num(form.status),
+                assigned_to: form.assigned_to ? Number(form.assigned_to) : null,
+                tags: form.tags,
+                due_date: form.due_date || null,
+            });
+            onIssueCreated?.(res.data);
+            if (another) {
+                setForm((f) => ({ ...f, subject: '', description: '', due_date: '' }));
+                setCreated(`Issue #${res.data.ref} reported. Add the next one.`);
+                subjectRef.current?.focus();
+            } else {
+                toast.success(`Issue #${res.data.ref} reported`);
+                onClose();
+            }
+        } catch (err) {
+            setApiError(getErrorMessage(err, 'Could not create the issue.'));
+        } finally {
+            setBusy(false);
         }
-        if (prioritiesRes.data.length > 0) {
-          setFormData(prev => ({ ...prev, priority: prioritiesRes.data[0].id }));
-        }
-        if (severitiesRes.data.length > 0) {
-          setFormData(prev => ({ ...prev, severity: severitiesRes.data[0].id }));
-        }
-      } catch (err) {
-        console.error("Failed to fetch data", err);
-      }
     };
 
-    fetchData();
-  }, [projectId]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError('');
-
-    try {
-      const payload = {
-        project: parseInt(projectId),
-        subject: formData.subject,
-        description: formData.description,
-        type: parseInt(formData.type),
-        status: parseInt(formData.status),
-        priority: parseInt(formData.priority),
-        severity: parseInt(formData.severity),
-      };
-
-      if (formData.assigned_to) {
-        payload.assigned_to = parseInt(formData.assigned_to);
-      }
-
-      if (formData.tags) {
-        payload.tags = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
-      }
-
-      await client.post('issues', payload);
-      onIssueCreated();
-      onClose();
-    } catch (err) {
-      console.error("Failed to create issue", err);
-      setError(err.response?.data?._error_message || "Failed to create issue.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.7)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: '1rem',
-      overflowY: 'auto'
-    }}>
-      <div className="card" style={{ maxWidth: '600px', width: '100%', position: 'relative', margin: '2rem auto' }}>
-        <button 
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: '1rem',
-            right: '1rem',
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: '1.2rem'
-          }}
-        >
-          <FaTimes />
-        </button>
-
-        <h3 style={{ marginBottom: '1.5rem' }}>Create New Issue</h3>
-
-        {error && (
-          <div style={{ 
-            background: 'rgba(255, 59, 48, 0.1)', 
-            border: '1px solid var(--error)', 
-            color: 'var(--error)', 
-            padding: '1rem', 
-            borderRadius: '8px',
-            marginBottom: '1.5rem'
-          }}>
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit}>
-          <div className="input-group">
-            <label className="input-label">Issue Title *</label>
-            <input
-              type="text"
-              className="input-field"
-              value={formData.subject}
-              onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-              placeholder="e.g., Login button not working"
-              required
-              autoFocus
-            />
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Description</label>
-            <textarea
-              className="input-field"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Describe the issue in detail..."
-              rows="4"
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div className="input-group">
-              <label className="input-label">Type *</label>
-              <select
-                className="input-field"
-                value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-                required
-              >
-                {types.map(type => (
-                  <option key={type.id} value={type.id}>
-                    {type.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Status *</label>
-              <select
-                className="input-field"
-                value={formData.status}
-                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-                required
-              >
-                {statuses.map(status => (
-                  <option key={status.id} value={status.id}>
-                    {status.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-            <div className="input-group">
-              <label className="input-label">Priority *</label>
-              <select
-                className="input-field"
-                value={formData.priority}
-                onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-                required
-              >
-                {priorities.map(priority => (
-                  <option key={priority.id} value={priority.id}>
-                    {priority.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="input-group">
-              <label className="input-label">Severity *</label>
-              <select
-                className="input-field"
-                value={formData.severity}
-                onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
-                style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-                required
-              >
-                {severities.map(severity => (
-                  <option key={severity.id} value={severity.id}>
-                    {severity.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Assign To (Optional)</label>
-            <select
-              className="input-field"
-              value={formData.assigned_to}
-              onChange={(e) => setFormData({ ...formData, assigned_to: e.target.value })}
-              style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-            >
-              <option value="">Unassigned</option>
-              {members.map(member => (
-                <option key={member.id} value={member.user}>
-                  {member.full_name || member.user_email}
-                </option>
-              ))}
+    const select = (key, label, list, extra = {}) => (
+        <Field label={label} {...extra}>
+            <select className="form-input" value={form[key]} onChange={(e) => set(key, e.target.value)} aria-label={label}>
+                {statusOptions(list).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-          </div>
+        </Field>
+    );
 
-          <div className="input-group">
-            <label className="input-label">Tags (comma-separated)</label>
-            <input
-              type="text"
-              className="input-field"
-              value={formData.tags}
-              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-              placeholder="e.g., bug, critical, frontend"
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-            <button 
-              type="submit" 
-              className="btn btn-primary" 
-              style={{ flex: 1 }}
-              disabled={submitting}
-            >
-              {submitting ? 'Creating...' : 'Create Issue'}
-            </button>
-            <button 
-              type="button" 
-              onClick={onClose}
-              className="btn"
-              style={{ flex: 1, background: 'var(--bg-secondary)' }}
-            >
-              Cancel
-            </button>
-          </div>
+    return (
+        <form id={formId} onSubmit={submit} noValidate>
+            {created && <CreatedNote text={created} onDismiss={() => setCreated('')} />}
+            {apiError && <div className="alert alert-error mb-4" role="alert">{apiError}</div>}
+            <Field label="Subject" error={errors.subject}>
+                <input
+                    ref={subjectRef}
+                    className="form-input"
+                    value={form.subject}
+                    onChange={(e) => set('subject', e.target.value)}
+                    placeholder="e.g. Site access road blocked"
+                    aria-invalid={!!errors.subject}
+                    maxLength={500}
+                    autoFocus
+                />
+            </Field>
+            <Field label="Description" optional hint="Steps, impact, evidence… Markdown is supported.">
+                <textarea className="form-input" rows={4} value={form.description} onChange={(e) => set('description', e.target.value)} aria-label="Description" />
+            </Field>
+            <div className="form-grid">
+                {select('type', 'Type', project.issue_types)}
+                {select('status', 'Status', project.issue_statuses)}
+                {select('severity', 'Severity', project.severities)}
+                {select('priority', 'Priority', project.priorities)}
+                <Field label="Assigned to" optional>
+                    <select className="form-input" value={form.assigned_to} onChange={(e) => set('assigned_to', e.target.value)} aria-label="Assigned to">
+                        <option value="">Unassigned</option>
+                        {memberOptions(project.members).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                </Field>
+                <Field label="Due date" optional>
+                    <input type="date" className="form-input" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} aria-label="Due date" />
+                </Field>
+                <div className="form-group span-2">
+                    <span className="form-label">Tags <span className="optional">(optional)</span></span>
+                    <TagEditor value={form.tags} tagsColors={project.tags_colors} onChange={(v) => set('tags', v)} />
+                </div>
+            </div>
         </form>
-      </div>
-    </div>
-  );
+    );
+};
+
+/*
+ * Report an issue.
+ *   <CreateIssueModal projectId onClose onIssueCreated={(issue) => …} />
+ */
+const CreateIssueModal = ({ projectId, onClose, onIssueCreated }) => {
+    const { project } = useProjectData(projectId);
+    const [busy, setBusy] = useState(false);
+    const formId = `create-issue-${useId().replace(/:/g, '')}`;
+    return (
+        <Modal
+            isOpen
+            onClose={busy ? () => {} : onClose}
+            title="Report an issue"
+            size="lg"
+            footer={<CreateFooter formId={formId} busy={busy || !project} onCancel={onClose} label="Create issue" />}
+        >
+            {project ? (
+                <IssueForm project={project} projectId={projectId} formId={formId} setBusy={setBusy} onIssueCreated={onIssueCreated} onClose={onClose} />
+            ) : <Loader label="Loading project…" />}
+        </Modal>
+    );
 };
 
 export default CreateIssueModal;

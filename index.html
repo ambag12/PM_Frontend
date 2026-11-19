@@ -1,10 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>SocketSoft PM</title>
+    <meta name="description" content="SocketSoft PM: plan, deliver and oversee projects, sprints, tenders and staffing." />
+    <meta name="theme-color" content="#090909" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script>
+      // Apply the saved theme before first paint (dark by default, like socketsoft.io).
+      (function () {
+        try {
+          var p = localStorage.getItem('pm-theme') || 'dark';
+          var t = p === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : p;
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) { /* storage unavailable: stay dark */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

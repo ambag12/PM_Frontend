@@ -1,0 +1,16 @@
+.git/
+.github/
+.gitignore
+.gitattributes
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+*.log
+deploy/
+docker-compose*.yml
+.vscode/
+.idea/
+Taigo.postman_collection.json

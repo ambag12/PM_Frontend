@@ -1,273 +1,286 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { FaPlus, FaBook, FaEdit, FaTrash, FaLink } from 'react-icons/fa';
-import { wikiService, projectService } from '../api/services';
-import { PermissionProvider, PermissionGate } from '../context/PermissionContext';
-import { Card, Button, Modal } from '../components/UI';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { FaBook, FaPlus, FaHome, FaRedo, FaRegFileAlt } from 'react-icons/fa';
+import { wikiService } from '../api/services';
+import { useProject } from '../context/ProjectContext';
+import { usePermissions } from '../context/PermissionContext';
+import { useConfirm, useToast } from '../context/ToastContext';
+import { PageHeader, EmptyState, Loader } from '../components/UI';
+import WikiSidebar from '../components/wiki/WikiSidebar';
+import WikiPageView from '../components/wiki/WikiPageView';
+import WikiEditor from '../components/wiki/WikiEditor';
+import CreatePageModal from '../components/wiki/CreatePageModal';
+import { HOME_SLUG, leadingHeading, slugify, titleFromSlug } from '../components/wiki/wikiUtils';
+import '../styles/wiki.css';
 
 const Wiki = () => {
-    const { id: projectId } = useParams();
-    const navigate = useNavigate();
-    const [project, setProject] = useState(null);
-    const [pages, setPages] = useState([]);
-    const [links, setLinks] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [selectedPage, setSelectedPage] = useState(null);
-    const [showCreateModal, setShowCreateModal] = useState(false);
-    const [newPage, setNewPage] = useState({ title: '', content: '' });
+    const { project, projectId } = useProject();
+    const { hasPermission } = usePermissions();
+    const toast = useToast();
+    const confirm = useConfirm();
+    const [params, setParams] = useSearchParams();
+    const slug = params.get('page') || HOME_SLUG;
 
+    // Pages + links for the project (silent reloads keep the current data on screen).
+    const [nonce, setNonce] = useState(0);
+    const key = `${projectId}:${nonce}`;
+    const [data, setData] = useState({ key: null, pid: null, pages: [], links: [], error: null });
     useEffect(() => {
-        fetchData();
-    }, [projectId]);
+        if (!projectId) return undefined;
+        let alive = true;
+        Promise.all([wikiService.listPages(projectId), wikiService.listLinks(projectId)])
+            .then(([p, l]) => alive && setData({
+                key, pid: projectId, error: null,
+                pages: Array.isArray(p.data) ? p.data : [],
+                links: Array.isArray(l.data) ? l.data : [],
+            }))
+            .catch((error) => alive && setData((d) => ({ ...d, key, pid: projectId, error })));
+        return () => { alive = false; };
+    }, [key, projectId]);
+    const reload = () => setNonce((n) => n + 1);
+    const loaded = data.pid === projectId && data.key !== null;
+    const pages = useMemo(() => (loaded ? data.pages : []), [loaded, data.pages]);
+    const links = useMemo(() => (loaded ? data.links : []), [loaded, data.links]);
 
-    const fetchData = async () => {
-        try {
-            setLoading(true);
-            const [projectRes, pagesRes, linksRes] = await Promise.all([
-                projectService.get(projectId),
-                wikiService.listPages({ project: projectId }),
-                wikiService.listLinks({ project: projectId })
-            ]);
-            setProject(projectRes.data);
-            setPages(pagesRes.data);
-            setLinks(linksRes.data);
+    const [editingId, setEditingId] = useState(null);
+    const [createFor, setCreateFor] = useState(null); // null | { slug }
+    const [navOpen, setNavOpen] = useState(false);
+    const [watchBusy, setWatchBusy] = useState(false);
+    const [creatingHome, setCreatingHome] = useState(false);
 
-            // Select first page if available
-            if (pagesRes.data.length > 0 && !selectedPage) {
-                setSelectedPage(pagesRes.data[0]);
-            }
-        } catch (error) {
-            console.error('Error fetching wiki data:', error);
-        } finally {
-            setLoading(false);
-        }
+    const page = pages.find((p) => p.slug === slug) || null;
+    const editing = !!page && editingId === page.id;
+    const existingSlugs = useMemo(() => new Set(pages.map((p) => p.slug)), [pages]);
+    // Display title: leading "# Heading" of the page, else the title of a bookmark pointing at it, else the slug.
+    const linkTitles = useMemo(() => Object.fromEntries(links.map((l) => [l.href, l.title])), [links]);
+    const pageTitle = (p) => (p ? leadingHeading(p.content) || linkTitles[p.slug] || titleFromSlug(p.slug) : '');
+
+    const isAdmin = project?.i_am_admin || project?.i_am_owner;
+    const can = (perm) => isAdmin || hasPermission(perm);
+    const perms = {
+        addPage: can('add_wiki_page'),
+        modifyPage: can('modify_wiki_page'),
+        deletePage: can('delete_wiki_page'),
+        addLink: can('add_wiki_link'),
+        modifyLink: can('modify_wiki_link'),
+        deleteLink: can('delete_wiki_link'),
     };
 
-    const handleCreatePage = async () => {
+    const select = (s) => {
+        setParams(s === HOME_SLUG ? {} : { page: s });
+        setNavOpen(false);
+    };
+
+    const replacePage = (updated) => {
+        if (!updated) return;
+        setData((d) => ({ ...d, pages: d.pages.some((p) => p.id === updated.id) ? d.pages.map((p) => (p.id === updated.id ? updated : p)) : [...d.pages, updated] }));
+    };
+
+    const onCreated = (created) => {
+        setCreateFor(null);
+        replacePage(created);
+        select(created.slug);
+        setEditingId(created.id);
+    };
+
+    const createHome = async () => {
+        setCreatingHome(true);
         try {
-            const response = await wikiService.createPage({
-                project: projectId,
-                slug: newPage.title.toLowerCase().replace(/\s+/g, '-'),
-                content: newPage.content,
+            const res = await wikiService.createPage({
+                project: Number(projectId),
+                slug: HOME_SLUG,
+                content: `# ${project?.name || 'Project'} wiki\n\nWelcome! Use this page to collect key documents, decisions and how-tos.\n`,
             });
-            setShowCreateModal(false);
-            setNewPage({ title: '', content: '' });
-            fetchData();
-            setSelectedPage(response.data);
-        } catch (error) {
-            console.error('Error creating wiki page:', error);
+            toast.success('Home page created');
+            onCreated(res.data);
+        } catch (err) {
+            toast.error(err);
+        } finally {
+            setCreatingHome(false);
         }
     };
 
-    const handleDeletePage = async (pageId) => {
-        if (!window.confirm('Are you sure you want to delete this page?')) return;
-
+    const toggleWatch = async () => {
+        if (!page) return;
+        setWatchBusy(true);
         try {
-            await wikiService.deletePage(pageId);
-            if (selectedPage?.id === pageId) {
-                setSelectedPage(null);
-            }
-            fetchData();
-        } catch (error) {
-            console.error('Error deleting wiki page:', error);
+            if (page.is_watcher) await wikiService.unwatchPage(page.id);
+            else await wikiService.watchPage(page.id);
+            const res = await wikiService.getPage(page.id);
+            replacePage(res.data);
+            toast.success(page.is_watcher ? 'You stopped watching this page' : 'You are now watching this page');
+        } catch (err) {
+            toast.error(err);
+        } finally {
+            setWatchBusy(false);
         }
     };
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center" style={{ minHeight: '400px' }}>
-                <div className="spinner spinner-lg" />
+    const deletePage = async () => {
+        if (!page) return;
+        const linked = links.filter((l) => l.href === page.slug);
+        const ok = await confirm({
+            title: `Delete “${pageTitle(page)}”?`,
+            message: `The page, its attachments and history will be permanently deleted.${linked.length ? ' Bookmarks pointing to it will show as missing.' : ''}`,
+            confirmText: 'Delete page',
+            danger: true,
+        });
+        if (!ok) return;
+        try {
+            await wikiService.deletePage(page.id);
+            toast.success('Page deleted');
+            setData((d) => ({ ...d, pages: d.pages.filter((p) => p.id !== page.id) }));
+            select(HOME_SLUG);
+        } catch (err) {
+            toast.error(err);
+        }
+    };
+
+    const bookmarkTitle = page ? (slugify(pageTitle(page)) === page.slug ? pageTitle(page) : titleFromSlug(page.slug)) : '';
+    const canBookmark = perms.addLink && !!page && slugify(bookmarkTitle) === page.slug;
+    const bookmarked = !!page && links.some((l) => l.href === page.slug);
+    const bookmark = async () => {
+        try {
+            await wikiService.createLink({ project: Number(projectId), title: bookmarkTitle });
+            toast.success('Added to bookmarks');
+            reload();
+        } catch (err) {
+            toast.error(err);
+        }
+    };
+
+    const newPageButton = perms.addPage && (
+        <button className="btn btn-primary" onClick={() => setCreateFor({ slug: '' })}><FaPlus size={11} /> New page</button>
+    );
+
+    const failed = !!data.error && data.pid === projectId;
+    let main;
+    if (failed) {
+        main = null;
+    } else if (!loaded) {
+        main = <div className="card"><Loader label="Loading wiki…" /></div>;
+    } else if (!pages.length) {
+        main = (
+            <div className="card">
+                <EmptyState
+                    icon={<FaBook />}
+                    title="This wiki is empty"
+                    description="Start with a home page for key documents, decisions and how-tos. Other pages and bookmarks can follow."
+                    action={perms.addPage ? (
+                        <button className="btn btn-primary" onClick={createHome} disabled={creatingHome}>
+                            {creatingHome ? <span className="spinner spinner-sm" /> : <FaHome size={12} />} Create home page
+                        </button>
+                    ) : null}
+                />
             </div>
+        );
+    } else if (!page) {
+        main = (
+            <div className="card">
+                <EmptyState
+                    icon={<FaRegFileAlt />}
+                    title={`“${titleFromSlug(slug)}” doesn’t exist yet`}
+                    description={`There is no page at wiki/${slug}.${perms.addPage ? ' You can create it now.' : ''}`}
+                    action={(
+                        <div className="row justify-center flex-wrap">
+                            {perms.addPage && (
+                                <button className="btn btn-primary" onClick={() => (slug === HOME_SLUG ? createHome() : setCreateFor({ slug }))} disabled={creatingHome}>
+                                    <FaPlus size={11} /> Create this page
+                                </button>
+                            )}
+                            {slug !== HOME_SLUG && existingSlugs.has(HOME_SLUG) && (
+                                <button className="btn btn-secondary" onClick={() => select(HOME_SLUG)}><FaHome size={12} /> Go to home</button>
+                            )}
+                        </div>
+                    )}
+                />
+            </div>
+        );
+    } else if (editing) {
+        main = (
+            <div className="card flush wiki-page">
+                <div className="wiki-page-head">
+                    <div className="flex-1">
+                        <div className="eyebrow">Editing <span className="wiki-crumb-sep">/</span> <span className="mono">{page.slug}</span></div>
+                        <h2 className="wiki-page-title">{pageTitle(page)}</h2>
+                    </div>
+                </div>
+                <WikiEditor
+                    key={page.id}
+                    projectId={projectId}
+                    page={page}
+                    onCancel={() => setEditingId(null)}
+                    onSaved={(saved) => { replacePage(saved); setEditingId(null); }}
+                />
+            </div>
+        );
+    } else {
+        main = (
+            <WikiPageView
+                key={page.id}
+                page={page}
+                projectId={projectId}
+                members={project?.members}
+                canEdit={perms.modifyPage}
+                canDelete={perms.deletePage}
+                canBookmark={canBookmark}
+                bookmarked={bookmarked}
+                onEdit={() => setEditingId(page.id)}
+                onDelete={deletePage}
+                onToggleWatch={toggleWatch}
+                onBookmark={bookmark}
+                watchBusy={watchBusy}
+                titleOf={pageTitle}
+            />
         );
     }
 
     return (
-        <PermissionProvider project={project}>
-            <div className="page-header">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="page-title">Wiki</h1>
-                        <p className="page-subtitle">{project?.name} • {pages.length} pages</p>
-                    </div>
-                    <PermissionGate resourceType="wiki" action="add">
-                        <Button
-                            variant="primary"
-                            icon={<FaPlus />}
-                            onClick={() => setShowCreateModal(true)}
-                        >
-                            New Page
-                        </Button>
-                    </PermissionGate>
+        <div className="wiki-shell">
+            <PageHeader
+                icon={<FaBook />}
+                title="Wiki"
+                subtitle={project ? `Knowledge base for ${project.name}` : 'Project knowledge base'}
+                actions={newPageButton}
+            />
+
+            {failed && (
+                <div className="alert alert-error mb-4">
+                    <div className="flex-1">Couldn&apos;t load the wiki. {data.error?.message}</div>
+                    <button className="btn btn-secondary btn-sm" onClick={reload}><FaRedo size={11} /> Retry</button>
                 </div>
+            )}
+
+            <div className="wiki-layout">
+                <WikiSidebar
+                    projectId={projectId}
+                    pages={pages}
+                    links={links}
+                    currentSlug={slug}
+                    onSelect={select}
+                    onCreatePage={() => setCreateFor({ slug: '' })}
+                    onChanged={reload}
+                    canAddPage={perms.addPage}
+                    canAddLink={perms.addLink}
+                    canModifyLink={perms.modifyLink}
+                    canDeleteLink={perms.deleteLink}
+                    open={navOpen}
+                    onToggle={() => setNavOpen((o) => !o)}
+                    titleOf={pageTitle}
+                />
+                <div className="wiki-main">{main}</div>
             </div>
 
-            {/* Wiki Layout */}
-            <div style={{ display: 'flex', gap: '1.5rem', minHeight: '500px' }}>
-                {/* Sidebar - Page List */}
-                <div style={{ width: '280px', flexShrink: 0 }}>
-                    <Card>
-                        <h3 className="font-semibold mb-4">Pages</h3>
-                        {pages.length === 0 ? (
-                            <p className="text-sm text-muted">No wiki pages yet.</p>
-                        ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                {pages.map((page) => (
-                                    <div
-                                        key={page.id}
-                                        onClick={() => setSelectedPage(page)}
-                                        style={{
-                                            padding: '0.75rem',
-                                            borderRadius: 'var(--radius-md)',
-                                            cursor: 'pointer',
-                                            background: selectedPage?.id === page.id ? 'var(--primary-50)' : 'transparent',
-                                            color: selectedPage?.id === page.id ? 'var(--primary-700)' : 'var(--text-primary)',
-                                            transition: 'all var(--transition-fast)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.5rem',
-                                        }}
-                                    >
-                                        <FaBook size={12} />
-                                        <span className="truncate">{page.slug}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </Card>
-
-                    {/* Quick Links */}
-                    {links.length > 0 && (
-                        <Card className="mt-4">
-                            <h3 className="font-semibold mb-4">Quick Links</h3>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                {links.map((link) => (
-                                    <div
-                                        key={link.id}
-                                        onClick={() => {
-                                            const page = pages.find(p => p.id === link.wiki_page);
-                                            if (page) setSelectedPage(page);
-                                        }}
-                                        style={{
-                                            padding: '0.5rem 0.75rem',
-                                            fontSize: '0.875rem',
-                                            cursor: 'pointer',
-                                            color: 'var(--primary-600)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.5rem',
-                                        }}
-                                    >
-                                        <FaLink size={10} />
-                                        {link.title}
-                                    </div>
-                                ))}
-                            </div>
-                        </Card>
-                    )}
-                </div>
-
-                {/* Main Content - Selected Page */}
-                <div style={{ flex: 1 }}>
-                    {selectedPage ? (
-                        <Card>
-                            <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-xl font-semibold">{selectedPage.slug}</h2>
-                                <div className="flex gap-2">
-                                    <PermissionGate resourceType="wiki" action="modify">
-                                        <Button variant="secondary" size="sm" icon={<FaEdit />}>
-                                            Edit
-                                        </Button>
-                                    </PermissionGate>
-                                    <PermissionGate resourceType="wiki" action="delete">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            icon={<FaTrash />}
-                                            onClick={() => handleDeletePage(selectedPage.id)}
-                                        >
-                                            Delete
-                                        </Button>
-                                    </PermissionGate>
-                                </div>
-                            </div>
-                            <div
-                                className="wiki-content"
-                                style={{
-                                    lineHeight: 1.7,
-                                    color: 'var(--text-secondary)',
-                                }}
-                            >
-                                {selectedPage.content ? (
-                                    <div dangerouslySetInnerHTML={{ __html: selectedPage.html || selectedPage.content }} />
-                                ) : (
-                                    <p className="text-muted">No content on this page.</p>
-                                )}
-                            </div>
-                            <div className="mt-6 pt-4" style={{ borderTop: '1px solid var(--border-light)' }}>
-                                <p className="text-sm text-muted">
-                                    Last modified: {new Date(selectedPage.modified_date).toLocaleDateString()}
-                                </p>
-                            </div>
-                        </Card>
-                    ) : (
-                        <Card>
-                            <div className="empty-state">
-                                <div className="empty-state-icon">📖</div>
-                                <h3 className="empty-state-title">No Page Selected</h3>
-                                <p className="empty-state-description">
-                                    Select a page from the sidebar or create a new one.
-                                </p>
-                            </div>
-                        </Card>
-                    )}
-                </div>
-            </div>
-
-            {/* Create Page Modal */}
-            <Modal
-                isOpen={showCreateModal}
-                onClose={() => setShowCreateModal(false)}
-                title="Create Wiki Page"
-                size="lg"
-                footer={
-                    <>
-                        <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="primary"
-                            onClick={handleCreatePage}
-                            disabled={!newPage.title.trim()}
-                        >
-                            Create Page
-                        </Button>
-                    </>
-                }
-            >
-                <div className="form-group">
-                    <label className="form-label">Page Title *</label>
-                    <input
-                        type="text"
-                        className="form-input"
-                        placeholder="Page title (will be used as slug)..."
-                        value={newPage.title}
-                        onChange={(e) => setNewPage({ ...newPage, title: e.target.value })}
-                        autoFocus
-                    />
-                </div>
-                <div className="form-group">
-                    <label className="form-label">Content</label>
-                    <textarea
-                        className="form-input"
-                        placeholder="Write your wiki content here (markdown supported)..."
-                        value={newPage.content}
-                        onChange={(e) => setNewPage({ ...newPage, content: e.target.value })}
-                        rows={10}
-                        style={{ fontFamily: 'monospace' }}
-                    />
-                </div>
-            </Modal>
-        </PermissionProvider>
+            {createFor && (
+                <CreatePageModal
+                    projectId={projectId}
+                    existingSlugs={existingSlugs}
+                    initialSlug={createFor.slug}
+                    onClose={() => setCreateFor(null)}
+                    onCreated={onCreated}
+                />
+            )}
+        </div>
     );
 };
 

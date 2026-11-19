@@ -1,294 +1,242 @@
-import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
-import { FaPlus, FaUserPlus, FaEnvelope, FaTrash, FaEdit, FaCrown, FaUserShield } from 'react-icons/fa';
-import { membershipService, roleService, projectService } from '../api/services';
-import { PermissionProvider, PermissionGate, usePermissions } from '../context/PermissionContext';
-import { Card, Button, Badge, Modal, Avatar, Dropdown, DropdownItem, DropdownDivider } from '../components/UI';
+import React, { useContext, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { FaUsers, FaUserPlus, FaUserShield, FaEnvelopeOpenText, FaIdBadge, FaSearch, FaThLarge, FaList, FaTrash, FaPaperPlane } from 'react-icons/fa';
+import { membershipService, projectService } from '../api/services';
+import { useProject } from '../context/ProjectContext';
+import { usePermissions } from '../context/PermissionContext';
+import { AuthContext } from '../context/AuthContext';
+import { useToast, useConfirm } from '../context/ToastContext';
+import { PageHeader, StatCard, Loader, EmptyState, Switch, UserAvatar } from '../components/UI';
+import { useAsyncData } from '../components/settings/hooks';
+import MemberCard from '../components/settings/MemberCard';
+import InviteMembersModal from '../components/settings/InviteMembersModal';
+import { formatDate } from '../utils/format';
+import '../styles/settings.css';
+
+const displayName = (m) => m.full_name || m.user_email || m.email || 'Invited user';
 
 const Members = () => {
-    const { id: projectId } = useParams();
-    const [project, setProject] = useState(null);
-    const [members, setMembers] = useState([]);
-    const [roles, setRoles] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [showInviteModal, setShowInviteModal] = useState(false);
-    const [inviteEmail, setInviteEmail] = useState('');
-    const [inviteRole, setInviteRole] = useState('');
+    const { project, loading: projectLoading, reload: reloadProject } = useProject();
+    const { isAdmin, isOwner } = usePermissions();
+    const { user } = useContext(AuthContext);
+    const toast = useToast();
+    const confirm = useConfirm();
+    const projectId = project?.id;
+
+    const membersQ = useAsyncData(
+        () => (projectId ? membershipService.list({ project: projectId }).then((r) => r.data) : Promise.resolve([])),
+        [projectId],
+    );
+    const statsQ = useAsyncData(
+        () => (projectId ? projectService.getMemberStats(projectId).then((r) => r.data) : Promise.resolve(null)),
+        [projectId],
+    );
+
+    const [query, setQuery] = useState('');
+    const [roleFilter, setRoleFilter] = useState('');
+    const [view, setView] = useState('grid');
     const [inviting, setInviting] = useState(false);
+    const [busyId, setBusyId] = useState(null);
 
-    useEffect(() => {
-        fetchData();
-    }, [projectId]);
+    const canManage = !!(isAdmin || isOwner);
+    const roles = project?.roles || [];
+    const members = useMemo(() => membersQ.data || [], [membersQ.data]);
 
-    const fetchData = async () => {
+    const statsFor = (userId) => {
+        const s = statsQ.data;
+        if (!s || !userId) return null;
+        return Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v?.[userId] ?? 0]));
+    };
+
+    const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return members
+            .filter((m) => !roleFilter || String(m.role) === roleFilter)
+            .filter((m) => !q || [m.full_name, m.user_email, m.email, m.role_name].some((x) => x?.toLowerCase().includes(q)))
+            .sort((a, b) => Number(!a.user) - Number(!b.user) || Number(b.is_owner) - Number(a.is_owner) || Number(b.is_admin) - Number(a.is_admin) || displayName(a).localeCompare(displayName(b)));
+    }, [members, query, roleFilter]);
+
+    const counts = {
+        active: members.filter((m) => m.user).length,
+        admins: members.filter((m) => m.is_admin).length,
+        pending: members.filter((m) => !m.user).length,
+    };
+
+    const refresh = () => {
+        membersQ.reload();
+        reloadProject();
+    };
+
+    const patchMember = async (m, fields, msg) => {
+        setBusyId(m.id);
+        const prev = members;
+        membersQ.setData((list) => list.map((x) => (x.id === m.id ? { ...x, ...fields } : x)));
         try {
-            setLoading(true);
-            const [projectRes, membersRes, rolesRes] = await Promise.all([
-                projectService.get(projectId),
-                membershipService.list({ project: projectId }),
-                roleService.list({ project: projectId })
-            ]);
-            setProject(projectRes.data);
-            setMembers(membersRes.data);
-            setRoles(rolesRes.data);
-            if (rolesRes.data.length > 0) {
-                setInviteRole(rolesRes.data[0].id);
-            }
-        } catch (error) {
-            console.error('Error fetching members data:', error);
+            await membershipService.update(m.id, fields);
+            toast.success(msg);
+            refresh();
+        } catch (err) {
+            membersQ.setData(prev);
+            toast.error(err);
         } finally {
-            setLoading(false);
+            setBusyId(null);
         }
     };
 
-    const handleInvite = async () => {
-        if (!inviteEmail.trim() || !inviteRole) return;
+    const changeRole = (m, roleId) => {
+        const role = roles.find((r) => r.id === roleId);
+        patchMember(m, { role: roleId, role_name: role?.name }, `${displayName(m)} is now ${role?.name || 'updated'}`);
+    };
 
+    const toggleAdmin = (m, value) => patchMember(m, { is_admin: value }, `${displayName(m)} ${value ? 'is now an admin' : 'is no longer an admin'}`);
+
+    const remove = async (m) => {
+        const pending = !m.user;
+        const ok = await confirm({
+            title: pending ? 'Revoke invitation?' : `Remove ${displayName(m)}?`,
+            message: pending ? `The invitation sent to ${m.email || m.user_email} will stop working.` : 'They lose access to this project. Items they created or were assigned stay in place.',
+            confirmText: pending ? 'Revoke' : 'Remove member',
+            danger: true,
+        });
+        if (!ok) return;
+        setBusyId(m.id);
         try {
-            setInviting(true);
-            await membershipService.create({
-                project: projectId,
-                role: inviteRole,
-                username: inviteEmail,
-            });
-            setShowInviteModal(false);
-            setInviteEmail('');
-            fetchData();
-        } catch (error) {
-            console.error('Error inviting member:', error);
-            alert(error.response?.data?.message || 'Failed to invite member');
+            await membershipService.delete(m.id);
+            toast.success(pending ? 'Invitation revoked' : `${displayName(m)} removed from the project`);
+            refresh();
+        } catch (err) {
+            toast.error(err);
         } finally {
-            setInviting(false);
+            setBusyId(null);
         }
     };
 
-    const handleRemoveMember = async (memberId) => {
-        if (!window.confirm('Are you sure you want to remove this member?')) return;
-
+    const resend = async (m) => {
+        setBusyId(m.id);
         try {
-            await membershipService.delete(memberId);
-            fetchData();
-        } catch (error) {
-            console.error('Error removing member:', error);
+            await membershipService.resendInvitation(m.id);
+            toast.success(`Invitation re-sent to ${m.email || m.user_email}`);
+        } catch (err) {
+            toast.error(err);
+        } finally {
+            setBusyId(null);
         }
     };
 
-    const handleResendInvitation = async (memberId) => {
-        try {
-            await membershipService.resendInvitation(memberId);
-            alert('Invitation resent successfully');
-        } catch (error) {
-            console.error('Error resending invitation:', error);
-        }
-    };
+    if (projectLoading && !project) return <Loader label="Loading team…" />;
+    if (!project) return <EmptyState icon={<FaUsers />} title="Project unavailable" description="This project could not be loaded." action={<Link className="btn btn-primary" to="/">Back to dashboard</Link>} />;
 
-    const getRoleBadge = (member) => {
-        if (member.is_owner) {
-            return (
-                <Badge variant="warning">
-                    <FaCrown style={{ marginRight: '0.25rem' }} />
-                    Owner
-                </Badge>
-            );
-        }
-        if (member.is_admin) {
-            return (
-                <Badge variant="info">
-                    <FaUserShield style={{ marginRight: '0.25rem' }} />
-                    Admin
-                </Badge>
-            );
-        }
-        return <Badge>{member.role_name}</Badge>;
-    };
-
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center" style={{ minHeight: '400px' }}>
-                <div className="spinner spinner-lg" />
-            </div>
-        );
-    }
+    const cardProps = (m) => ({
+        m,
+        roles,
+        stats: statsFor(m.user),
+        canManage,
+        isMe: m.user === user?.id,
+        busy: busyId === m.id,
+        onRole: changeRole,
+        onAdmin: toggleAdmin,
+        onRemove: remove,
+        onResend: resend,
+    });
 
     return (
-        <PermissionProvider project={project}>
-            <div className="page-header">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="page-title">Team Members</h1>
-                        <p className="page-subtitle">{project?.name} • {members.length} members</p>
-                    </div>
-                    <PermissionGate permission="add_member">
-                        <Button
-                            variant="primary"
-                            icon={<FaUserPlus />}
-                            onClick={() => setShowInviteModal(true)}
-                        >
-                            Invite Member
-                        </Button>
-                    </PermissionGate>
-                </div>
+        <div>
+            <PageHeader
+                icon={<FaUsers />}
+                eyebrow={project.name}
+                title="Team"
+                subtitle="Everyone working on this project, their role and what they’ve been up to."
+                actions={(
+                    <>
+                        {canManage && <Link className="btn btn-secondary" to={`/project/${project.id}/settings?section=roles`}><FaUserShield /> Roles</Link>}
+                        {canManage && <button className="btn btn-primary" onClick={() => setInviting(true)}><FaUserPlus /> Invite people</button>}
+                    </>
+                )}
+            />
+
+            <div className="stats-grid">
+                <StatCard icon={<FaUsers />} label="Active members" value={counts.active} tone="primary" />
+                <StatCard icon={<FaUserShield />} label="Admins" value={counts.admins} tone="accent" />
+                <StatCard icon={<FaEnvelopeOpenText />} label="Pending invitations" value={counts.pending} tone={counts.pending ? 'warning' : 'neutral'} />
+                <StatCard icon={<FaIdBadge />} label="Roles" value={roles.length} tone="info" />
             </div>
 
-            {/* Members Grid */}
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                gap: '1.5rem'
-            }}>
-                {members.map((member) => (
-                    <Card key={member.id}>
-                        <div className="flex items-center gap-4">
-                            <Avatar
-                                name={member.full_name}
-                                src={member.photo}
-                                size="xl"
-                            />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div className="font-semibold truncate">{member.full_name}</div>
-                                <div className="text-sm text-muted truncate">{member.email}</div>
-                                <div className="mt-2">
-                                    {getRoleBadge(member)}
-                                    {!member.is_user_active && (
-                                        <Badge variant="warning" style={{ marginLeft: '0.5rem' }}>
-                                            Pending
-                                        </Badge>
-                                    )}
-                                </div>
-                            </div>
-
-                            <PermissionGate permission="remove_member">
-                                {!member.is_owner && (
-                                    <Dropdown
-                                        trigger={
-                                            <button className="btn btn-ghost btn-icon">
-                                                <FaEdit />
-                                            </button>
-                                        }
-                                    >
-                                        {!member.is_user_active && (
-                                            <DropdownItem
-                                                icon={<FaEnvelope />}
-                                                onClick={() => handleResendInvitation(member.id)}
-                                            >
-                                                Resend Invitation
-                                            </DropdownItem>
-                                        )}
-                                        <DropdownDivider />
-                                        <DropdownItem
-                                            icon={<FaTrash />}
-                                            danger
-                                            onClick={() => handleRemoveMember(member.id)}
-                                        >
-                                            Remove Member
-                                        </DropdownItem>
-                                    </Dropdown>
-                                )}
-                            </PermissionGate>
-                        </div>
-                    </Card>
-                ))}
-            </div>
-
-            {members.length === 0 && (
-                <div className="empty-state">
-                    <div className="empty-state-icon">👥</div>
-                    <h3 className="empty-state-title">No Team Members</h3>
-                    <p className="empty-state-description">
-                        Start building your team by inviting members.
-                    </p>
-                    <PermissionGate permission="add_member">
-                        <Button
-                            variant="primary"
-                            icon={<FaUserPlus />}
-                            onClick={() => setShowInviteModal(true)}
-                        >
-                            Invite First Member
-                        </Button>
-                    </PermissionGate>
-                </div>
+            {!canManage && (
+                <div className="alert mb-4">Only project administrators can invite people or change roles.</div>
             )}
 
-            {/* Roles Section */}
-            <div className="mt-8">
-                <h2 className="text-xl font-semibold mb-4">Project Roles</h2>
-                <Card>
+            <div className="toolbar">
+                <div className="form-input-icon" style={{ flex: '1 1 220px', maxWidth: 340 }}>
+                    <FaSearch />
+                    <input className="form-input" placeholder="Search by name, email or role" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search members" />
+                </div>
+                <select className="form-input" style={{ width: 'auto', minWidth: 160 }} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Filter by role">
+                    <option value="">All roles</option>
+                    {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+                <div className="segmented ml-auto" role="group" aria-label="View">
+                    <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')} aria-pressed={view === 'grid'}><FaThLarge /> Cards</button>
+                    <button className={view === 'table' ? 'active' : ''} onClick={() => setView('table')} aria-pressed={view === 'table'}><FaList /> Table</button>
+                </div>
+            </div>
+
+            {membersQ.loading ? <Loader label="Loading members…" /> : membersQ.error ? (
+                <div className="alert alert-error">Could not load the member list.</div>
+            ) : filtered.length === 0 ? (
+                <div className="card"><EmptyState icon={<FaUsers />} title={members.length ? 'No members match' : 'No members yet'} description={members.length ? 'Try a different search or role filter.' : 'Invite people to start collaborating.'} /></div>
+            ) : view === 'grid' ? (
+                <div className="member-grid">
+                    {filtered.map((m) => <MemberCard key={m.id} {...cardProps(m)} />)}
+                </div>
+            ) : (
+                <div className="table-wrap">
                     <table className="data-table">
                         <thead>
-                            <tr>
-                                <th>Role Name</th>
-                                <th>Members</th>
-                                <th>Permissions</th>
-                            </tr>
+                            <tr><th>Member</th><th>Role</th><th>Admin</th><th>Status</th><th className="text-right">Closed tasks</th><th className="text-right">Issues closed</th><th className="text-right">Issues filed</th>{canManage && <th />}</tr>
                         </thead>
                         <tbody>
-                            {roles.map((role) => {
-                                const roleMembers = members.filter(m => m.role === role.id);
+                            {filtered.map((m) => {
+                                const s = statsFor(m.user) || {};
+                                const pending = !m.user;
                                 return (
-                                    <tr key={role.id}>
-                                        <td className="font-medium">{role.name}</td>
-                                        <td>{roleMembers.length} members</td>
+                                    <tr key={m.id}>
                                         <td>
-                                            <span className="text-sm text-muted">
-                                                {role.permissions?.length || 0} permissions
-                                            </span>
+                                            <div className="row">
+                                                <UserAvatar user={{ full_name_display: displayName(m), photo: m.photo }} size="sm" />
+                                                <div style={{ minWidth: 0 }}>
+                                                    <div className="cell-title truncate">{displayName(m)}</div>
+                                                    <div className="text-xs text-muted truncate">{m.user_email || m.email}</div>
+                                                </div>
+                                            </div>
                                         </td>
+                                        <td>
+                                            {canManage ? (
+                                                <select className="form-input form-input-sm" value={m.role} onChange={(e) => changeRole(m, Number(e.target.value))} disabled={busyId === m.id} aria-label={`Role for ${displayName(m)}`}>
+                                                    {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                                </select>
+                                            ) : m.role_name}
+                                        </td>
+                                        <td><Switch checked={m.is_admin} disabled={!canManage || m.is_owner || busyId === m.id} onChange={(v) => toggleAdmin(m, v)} label={<span className="sr-only">Admin</span>} /></td>
+                                        <td>{pending ? <span className="badge badge-warning">Pending · {formatDate(m.created_at)}</span> : m.is_owner ? <span className="badge badge-accent">Owner</span> : <span className="badge badge-success">Active</span>}</td>
+                                        <td className="text-right tabular">{pending ? '—' : s.closed_tasks ?? 0}</td>
+                                        <td className="text-right tabular">{pending ? '—' : s.closed_bugs ?? 0}</td>
+                                        <td className="text-right tabular">{pending ? '—' : s.created_bugs ?? 0}</td>
+                                        {canManage && (
+                                            <td className="cell-actions">
+                                                {pending && <button className="btn btn-ghost btn-sm btn-icon" onClick={() => resend(m)} aria-label="Resend invitation" title="Resend invitation"><FaPaperPlane /></button>}
+                                                <button className="btn btn-danger-ghost btn-sm btn-icon" onClick={() => remove(m)} disabled={m.is_owner} aria-label={`Remove ${displayName(m)}`} title="Remove"><FaTrash /></button>
+                                            </td>
+                                        )}
                                     </tr>
                                 );
                             })}
                         </tbody>
                     </table>
-                </Card>
-            </div>
+                </div>
+            )}
 
-            {/* Invite Modal */}
-            <Modal
-                isOpen={showInviteModal}
-                onClose={() => setShowInviteModal(false)}
-                title="Invite Team Member"
-                footer={
-                    <>
-                        <Button variant="secondary" onClick={() => setShowInviteModal(false)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="primary"
-                            onClick={handleInvite}
-                            disabled={!inviteEmail.trim() || inviting}
-                            loading={inviting}
-                        >
-                            Send Invitation
-                        </Button>
-                    </>
-                }
-            >
-                <div className="form-group">
-                    <label className="form-label">Email or Username *</label>
-                    <input
-                        type="text"
-                        className="form-input"
-                        placeholder="Enter email or username..."
-                        value={inviteEmail}
-                        onChange={(e) => setInviteEmail(e.target.value)}
-                        autoFocus
-                    />
-                </div>
-                <div className="form-group">
-                    <label className="form-label">Role</label>
-                    <select
-                        className="form-input"
-                        value={inviteRole}
-                        onChange={(e) => setInviteRole(e.target.value)}
-                    >
-                        {roles.map((role) => (
-                            <option key={role.id} value={role.id}>
-                                {role.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-            </Modal>
-        </PermissionProvider>
+            {inviting && <InviteMembersModal project={project} roles={roles} onClose={() => setInviting(false)} onInvited={refresh} />}
+        </div>
     );
 };
 

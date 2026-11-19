@@ -1,18 +1,23 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import HRComponent from '../components/HR';
+import { FaUserTie } from 'react-icons/fa';
+import HRBoard from '../components/HR';
 
+// Serves both /hr (all of my projects) and /project/:id/hr (one project).
 const HR = () => {
     const { id: projectId } = useParams();
-
     return (
-        <div className="container py-8">
-            <div className="page-header">
-                <h1 className="page-title">HR Management</h1>
-                <p className="page-subtitle">Track human resources and function records</p>
-            </div>
-            <HRComponent projectId={projectId} />
-        </div>
+        <HRBoard
+            key={projectId || 'all'}
+            projectId={projectId}
+            header={{
+                title: projectId ? 'HR & staffing' : 'HR & staffing — all projects',
+                icon: <FaUserTie />,
+                subtitle: projectId
+                    ? 'Sanctioned posts, recruitment progress and vacancies for this project'
+                    : 'Sanctioned posts and vacancies across all your projects',
+            }}
+        />
     );
 };
 

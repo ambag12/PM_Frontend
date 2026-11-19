@@ -1,32 +1,101 @@
 import client from './client';
 
+// Small helpers ------------------------------------------------------------
+const crud = (base) => ({
+    list: (params) => client.get(base, { params }),
+    get: (id) => client.get(`${base}/${id}`),
+    create: (data) => client.post(base, data),
+    update: (id, data) => client.patch(`${base}/${id}`, data),
+    delete: (id, params) => client.delete(`${base}/${id}`, { params }),
+});
+
+// Taiga "project values" (statuses, points, priorities…) all share this shape.
+const projectValues = (base) => ({
+    ...crud(base),
+    bulkUpdateOrder: (projectId, orderPairs) =>
+        client.post(`${base}/bulk_update_order`, { project: projectId, [`bulk_${base.replace(/-/g, '_')}`]: orderPairs }), // orderPairs: [[id, order], …]
+    // Deleting a value requires moving its items to another value.
+    deleteMoveTo: (id, moveTo) => client.delete(`${base}/${id}`, { params: moveTo ? { moveTo } : {} }),
+});
+
+// Attachments live under "<resource>/attachments" for epics, userstories, tasks, issues and wiki.
+const attachments = (resource) => ({
+    list: (projectId, objectId) => client.get(`${resource}/attachments`, { params: { project: projectId, object_id: objectId } }),
+    get: (id) => client.get(`${resource}/attachments/${id}`),
+    upload: (projectId, objectId, file, description = '') => {
+        const fd = new FormData();
+        fd.append('project', projectId);
+        fd.append('object_id', objectId);
+        fd.append('attached_file', file);
+        if (description) fd.append('description', description);
+        return client.post(`${resource}/attachments`, fd);
+    },
+    update: (id, data) => client.patch(`${resource}/attachments/${id}`, data),
+    delete: (id) => client.delete(`${resource}/attachments/${id}`),
+});
+
+// Custom attribute definitions + per-item values.
+const customAttributes = (defsBase, valuesBase) => ({
+    list: (projectId) => client.get(defsBase, { params: { project: projectId } }),
+    create: (data) => client.post(defsBase, data),
+    update: (id, data) => client.patch(`${defsBase}/${id}`, data),
+    delete: (id) => client.delete(`${defsBase}/${id}`),
+    bulkUpdateOrder: (projectId, orderPairs) =>
+        client.post(`${defsBase}/bulk_update_order`, { project: projectId, [`bulk_${defsBase.replace(/-/g, '_')}`]: orderPairs }),
+    getValues: (objectId) => client.get(`${valuesBase}/${objectId}`),
+    // data: { attributes_values: { [attrId]: value }, version }
+    updateValues: (objectId, data) => client.patch(`${valuesBase}/${objectId}`, data),
+});
+
+// Voting + watching + comments shared by epics, userstories, tasks, issues.
+const social = (base) => ({
+    upvote: (id) => client.post(`${base}/${id}/upvote`),
+    downvote: (id) => client.post(`${base}/${id}/downvote`),
+    getVoters: (id) => client.get(`${base}/${id}/voters`),
+    watch: (id) => client.post(`${base}/${id}/watch`),
+    unwatch: (id) => client.post(`${base}/${id}/unwatch`),
+    getWatchers: (id) => client.get(`${base}/${id}/watchers`),
+    // Taiga adds comments by PATCHing the item with { comment, version }.
+    addComment: (id, comment, version) => client.patch(`${base}/${id}`, { comment, version }),
+});
+
 // ============================================
-// AUTH SERVICE
+// AUTH
 // ============================================
 export const authService = {
     login: (username, password) => client.post('auth', { type: 'normal', username, password }),
-    register: (userData) => client.post('auth/register/', { type: 'public', ...userData }),
-    refreshToken: (refreshToken) => client.post('auth/refresh', { refresh: refreshToken }),
-    changePassword: (currentPassword, newPassword) => client.post('users/change_password', { current_password: currentPassword, password: newPassword }),
+    register: (userData) => client.post('auth/register', { type: 'public', accepted_terms: true, ...userData }),
+    refreshToken: (refresh) => client.post('auth/refresh', { refresh }),
 };
 
 // ============================================
-// USERS SERVICE
+// USERS
 // ============================================
 export const userService = {
     list: (params) => client.get('users', { params }),
     get: (id) => client.get(`users/${id}`),
     getMe: () => client.get('users/me'),
     update: (id, data) => client.patch(`users/${id}`, data),
-    updateMe: (data) => client.patch('users/me', data),
-    getContacts: () => client.get('users/contacts'),
-    getLiked: (id) => client.get(`users/${id}/liked`),
-    getVoted: (id) => client.get(`users/${id}/voted`),
-    getWatched: (id) => client.get(`users/${id}/watched`),
+    getStats: (id) => client.get(`users/${id}/stats`),
+    getContacts: (id) => client.get(`users/${id}/contacts`),
+    getLiked: (id, params) => client.get(`users/${id}/liked`, { params }),
+    getVoted: (id, params) => client.get(`users/${id}/voted`, { params }),
+    getWatched: (id, params) => client.get(`users/${id}/watched`, { params }),
+    changePassword: (currentPassword, password) => client.post('users/change_password', { current_password: currentPassword, password }),
+    changeAvatar: (file) => {
+        const fd = new FormData();
+        fd.append('avatar', file);
+        return client.post('users/change_avatar', fd);
+    },
+    removeAvatar: () => client.post('users/remove_avatar'),
+    sendVerificationEmail: () => client.post('users/send_verification_email'),
+    passwordRecovery: (username) => client.post('users/password_recovery', { username }),
+    changeEmail: (emailToken) => client.post('users/change_email', { email_token: emailToken }),
+    cancelAccount: (cancelToken) => client.post('users/cancel', { cancel_token: cancelToken }),
 };
 
 // ============================================
-// PROJECTS SERVICE
+// PROJECTS (incl. custom endpoints: due date, PC1, tenders, HR, remarks)
 // ============================================
 export const projectService = {
     list: (params) => client.get('projects', { params }),
@@ -36,380 +105,370 @@ export const projectService = {
     create: (data) => client.post('projects', data),
     update: (id, data) => client.patch(`projects/${id}`, data),
     delete: (id) => client.delete(`projects/${id}`),
-    bulkUpdateOrder: (data) => client.post('projects/bulk_update_order', data),
+    bulkUpdateOrder: (orderPairs) => client.post('projects/bulk_update_order', orderPairs),
 
     // Stats
     getStats: (id) => client.get(`projects/${id}/stats`),
+    getMemberStats: (id) => client.get(`projects/${id}/member_stats`),
     getIssuesStats: (id) => client.get(`projects/${id}/issues_stats`),
 
-    // Modules
-    getModules: (id) => client.get(`projects/${id}/modules`),
+    // Modules (integrations config) & feature toggles live on the project itself
+    getModules: (id) => client.get(`projects/${id}/modules`, { params: { project: id } }), // GET also needs ?project (admin check)
     updateModules: (id, data) => client.patch(`projects/${id}/modules`, data),
 
     // Tags
-    getTags: (id) => client.get(`projects/${id}/tags_colors`),
-    createTag: (id, data) => client.post(`projects/${id}/create_tag`, data),
-    editTag: (id, data) => client.post(`projects/${id}/edit_tag`, data),
-    deleteTag: (id, data) => client.post(`projects/${id}/delete_tag`, data),
-    mixTags: (id, data) => client.post(`projects/${id}/mix_tags`, data),
+    getTagsColors: (id) => client.get(`projects/${id}/tags_colors`),
+    createTag: (id, tag, color) => client.post(`projects/${id}/create_tag`, { tag, color }),
+    editTag: (id, fromTag, toTag, color) => client.post(`projects/${id}/edit_tag`, { from_tag: fromTag, to_tag: toTag, color }),
+    deleteTag: (id, tag) => client.post(`projects/${id}/delete_tag`, { tag }),
+    mixTags: (id, fromTags, toTag) => client.post(`projects/${id}/mix_tags`, { from_tags: fromTags, to_tag: toTag }),
 
-    // Duplicate/Transfer
-    duplicate: (id, data) => client.post(`projects/${id}/duplicate`, data),
-    transferRequest: (id) => client.post(`projects/${id}/transfer_request`),
-    transferStart: (id, token) => client.post(`projects/${id}/transfer_start`, { token }),
-    transferReject: (id, token) => client.post(`projects/${id}/transfer_reject`, { token }),
-    transferAccept: (id, token) => client.post(`projects/${id}/transfer_accept`, { token }),
+    // Logo
+    changeLogo: (id, file) => {
+        const fd = new FormData();
+        fd.append('logo', file);
+        return client.post(`projects/${id}/change_logo`, fd);
+    },
+    removeLogo: (id) => client.post(`projects/${id}/remove_logo`),
 
-    // Watch/Like
-    watch: (id) => client.post(`projects/${id}/watch`),
-    unwatch: (id) => client.post(`projects/${id}/unwatch`),
+    // Social
     like: (id) => client.post(`projects/${id}/like`),
     unlike: (id) => client.post(`projects/${id}/unlike`),
+    getFans: (id) => client.get(`projects/${id}/fans`),
+    watch: (id, notifyLevel) => client.post(`projects/${id}/watch`, notifyLevel ? { notify_level: notifyLevel } : {}),
+    unwatch: (id) => client.post(`projects/${id}/unwatch`),
+    getWatchers: (id) => client.get(`projects/${id}/watchers`),
+
+    // Membership lifecycle
+    leave: (id) => client.post(`projects/${id}/leave`),
+    duplicate: (id, data) => client.post(`projects/${id}/duplicate`, data), // { name, description, is_private, users: [{id}] }
+    createTemplate: (id, data) => client.post(`projects/${id}/create_template`, data), // superuser only
+
+    // Transfer ownership
+    transferValidateToken: (id, token) => client.post(`projects/${id}/transfer_validate_token`, { token }),
+    transferRequest: (id) => client.post(`projects/${id}/transfer_request`),
+    transferStart: (id, userId) => client.post(`projects/${id}/transfer_start`, { user: userId }),
+    transferAccept: (id, token, reason = '') => client.post(`projects/${id}/transfer_accept`, { token, reason }),
+    transferReject: (id, token, reason = '') => client.post(`projects/${id}/transfer_reject`, { token, reason }),
+
+    // CSV export links (admin)
+    regenerateCsvUuid: (id, kind) => client.post(`projects/${id}/regenerate_${kind}_csv_uuid`), // kind: epics|userstories|tasks|issues
+    deleteCsvUuid: (id, kind) => client.post(`projects/${id}/delete_${kind}_csv_uuid`),
+
+    // ---- Custom endpoints added in this fork ----
+    // Due date: "YYYY-MM-DD"
+    changeDueDate: (id, dueDate) => client.patch(`projects/${id}/change_due_date`, { due_date: dueDate }),
+    // PC-1 document upload (stored on Cloudinary, URL saved to project.pc1_url)
+    uploadPc1: (projectId, file) => {
+        const fd = new FormData();
+        fd.append('project_id', projectId);
+        fd.append('pc1', file);
+        return client.post('projects/upload_pc1', fd);
+    },
 };
 
 // ============================================
-// PROJECT TEMPLATES SERVICE (SuperAdmin)
+// TENDERS (custom)
 // ============================================
-export const projectTemplateService = {
-    list: () => client.get('project-templates'),
-    get: (id) => client.get(`project-templates/${id}`),
-    create: (data) => client.post('project-templates', data),
-    update: (id, data) => client.patch(`project-templates/${id}`, data),
-    delete: (id) => client.delete(`project-templates/${id}`),
+export const TENDER_STATUSES = [
+    { value: 'not_started', label: 'Not Started', tone: 'neutral' },
+    { value: 'pending', label: 'Pending', tone: 'warning' },
+    { value: 'in_progress', label: 'In Progress', tone: 'info' },
+    { value: 'on_hold', label: 'On Hold', tone: 'danger' },
+    { value: 'completed', label: 'Completed', tone: 'success' },
+];
+
+export const tenderService = {
+    // Backend only returns tenders when a project (or tender_id) is given, except for superusers.
+    list: (projectId) => client.get('projects/get_tenders', { params: projectId ? { project: projectId } : {} }),
+    get: (tenderId) => client.get('projects/get_tenders', { params: { tender_id: tenderId } }),
+    // data: { project, name_of_tenders, status, tech_opeining, financial_opening }
+    create: (data) => client.post('projects/create_tenders', data),
+    update: (tenderId, data) => client.patch('projects/update_tenders', { tender_id: tenderId, ...data }),
 };
 
 // ============================================
-// MEMBERSHIPS SERVICE
+// HR (custom)
+// ============================================
+export const hrService = {
+    list: (projectId) => client.get('projects/get_hr_func', { params: projectId ? { project: projectId } : {} }),
+    get: (hrId) => client.get('projects/get_hr_func', { params: { hr_id: hrId } }),
+    // fields: project, hr_name, filename, position, ppps, no_of_posts, filled, vacancy, created_date, finish_date; file optional
+    create: (fields, file) => {
+        const fd = new FormData();
+        Object.entries(fields).forEach(([k, v]) => {
+            if (v !== undefined && v !== null && v !== '') fd.append(k, v);
+        });
+        if (file) fd.append('file', file);
+        return client.post('projects/post_hr_func', fd);
+    },
+};
+
+// ============================================
+// REMARKS (custom) — attach to an HR record or a tender
+// ============================================
+export const remarkService = {
+    // data: { project, remarks, hr?, tenders?, user_member? (membership id) }
+    create: (data) => client.post('projects/create_remarks', data),
+};
+
+// ============================================
+// PROJECT TEMPLATES
+// ============================================
+export const projectTemplateService = crud('project-templates');
+
+// ============================================
+// MEMBERSHIPS & INVITATIONS
 // ============================================
 export const membershipService = {
-    list: (params) => client.get('memberships', { params }),
-    get: (id) => client.get(`memberships/${id}`),
-    create: (data) => client.post('memberships', data),
+    ...crud('memberships'),
+    // data: { project_id, bulk_memberships: [{ role_id, username }], invitation_extra_text }
     bulkCreate: (data) => client.post('memberships/bulk_create', data),
-    update: (id, data) => client.patch(`memberships/${id}`, data),
-    delete: (id) => client.delete(`memberships/${id}`),
     resendInvitation: (id) => client.post(`memberships/${id}/resend_invitation`),
-    getInvitationByToken: (token) => client.get('invitations', { params: { token } }),
+    getInvitation: (token) => client.get(`invitations/${token}`),
 };
 
 // ============================================
-// ROLES SERVICE
+// ROLES
 // ============================================
 export const roleService = {
-    list: (params) => client.get('roles', { params }),
-    get: (id) => client.get(`roles/${id}`),
-    create: (data) => client.post('roles', data),
-    update: (id, data) => client.patch(`roles/${id}`, data),
-    delete: (id) => client.delete(`roles/${id}`),
+    ...crud('roles'),
+    deleteMoveTo: (id, moveTo) => client.delete(`roles/${id}`, { params: moveTo ? { moveTo } : {} }),
 };
 
 // ============================================
-// USER STORIES SERVICE
+// EPICS
+// ============================================
+export const epicService = {
+    ...crud('epics'),
+    ...social('epics'),
+    getByRef: (projectId, ref) => client.get('epics/by_ref', { params: { project: projectId, ref } }),
+    bulkCreate: (projectId, bulkEpics, statusId) => client.post('epics/bulk_create', { project_id: projectId, status_id: statusId, bulk_epics: bulkEpics }),
+    getFiltersData: (projectId, params = {}) => client.get('epics/filters_data', { params: { ...params, project: projectId } }),
+    // Related user stories
+    listRelated: (epicId) => client.get(`epics/${epicId}/related_userstories`),
+    addRelated: (epicId, userStoryId) => client.post(`epics/${epicId}/related_userstories`, { epic: epicId, user_story: userStoryId }),
+    updateRelated: (epicId, userStoryId, data) => client.patch(`epics/${epicId}/related_userstories/${userStoryId}`, data),
+    removeRelated: (epicId, userStoryId) => client.delete(`epics/${epicId}/related_userstories/${userStoryId}`),
+    bulkCreateRelated: (epicId, projectId, bulkUserstories) =>
+        client.post(`epics/${epicId}/related_userstories/bulk_create`, { project_id: projectId, bulk_userstories: bulkUserstories }),
+    attachments: attachments('epics'),
+    customAttributes: customAttributes('epic-custom-attributes', 'epics/custom-attributes-values'),
+};
+
+// ============================================
+// USER STORIES
 // ============================================
 export const userStoryService = {
-    list: (params) => client.get('userstories', { params }),
-    get: (id) => client.get(`userstories/${id}`),
+    ...crud('userstories'),
+    ...social('userstories'),
     getByRef: (projectId, ref) => client.get('userstories/by_ref', { params: { project: projectId, ref } }),
-    create: (data) => client.post('userstories', data),
-    update: (id, data) => client.patch(`userstories/${id}`, data),
-    delete: (id) => client.delete(`userstories/${id}`),
-    bulkCreate: (projectId, data) => client.post('userstories/bulk_create', { project_id: projectId, ...data }),
-    bulkUpdateBacklogOrder: (projectId, data) => client.post('userstories/bulk_update_backlog_order', { project_id: projectId, ...data }),
-    bulkUpdateKanbanOrder: (projectId, data) => client.post('userstories/bulk_update_kanban_order', { project_id: projectId, ...data }),
-    bulkUpdateMilestone: (projectId, data) => client.post('userstories/bulk_update_milestone', { project_id: projectId, ...data }),
-    getFiltersData: (projectId) => client.get('userstories/filters_data', { params: { project: projectId } }),
-
-    // Voting
-    upvote: (id) => client.post(`userstories/${id}/upvote`),
-    downvote: (id) => client.post(`userstories/${id}/downvote`),
-
-    // Watching
-    watch: (id) => client.post(`userstories/${id}/watch`),
-    unwatch: (id) => client.post(`userstories/${id}/unwatch`),
-    getWatchers: (id) => client.get(`userstories/${id}/voters`),
-
-    // Attachments
-    getAttachments: (id) => client.get('userstory-attachments', { params: { object_id: id } }),
-    createAttachment: (id, formData) => client.post('userstory-attachments', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        params: { object_id: id }
-    }),
+    bulkCreate: (projectId, bulkStories, statusId) => client.post('userstories/bulk_create', { project_id: projectId, status_id: statusId, bulk_stories: bulkStories }),
+    // bulk_userstories: [usId, …]; extra: { milestone_id? (moves the stories into that sprint; omit = backlog),
+    // after_userstory_id? | before_userstory_id? } — no neighbour = top of the list
+    bulkUpdateBacklogOrder: (projectId, bulkUserstories, extra = {}) =>
+        client.post('userstories/bulk_update_backlog_order', { project_id: projectId, bulk_userstories: bulkUserstories, ...extra }),
+    // Kanban move: status + optional swimlane + ordering neighbour
+    bulkUpdateKanbanOrder: (projectId, statusId, bulkUserstories, extra = {}) =>
+        client.post('userstories/bulk_update_kanban_order', { project_id: projectId, status_id: statusId, bulk_userstories: bulkUserstories, ...extra }),
+    // bulkStories: [{ us_id, order }] (backend key is `bulk_stories`)
+    bulkUpdateMilestone: (projectId, milestoneId, bulkStories) =>
+        client.post('userstories/bulk_update_milestone', { project_id: projectId, milestone_id: milestoneId, bulk_stories: bulkStories }),
+    getFiltersData: (projectId, params = {}) => client.get('userstories/filters_data', { params: { ...params, project: projectId } }),
+    attachments: attachments('userstories'),
+    customAttributes: customAttributes('userstory-custom-attributes', 'userstories/custom-attributes-values'),
 };
 
 // ============================================
-// TASKS SERVICE
+// TASKS
 // ============================================
 export const taskService = {
-    list: (params) => client.get('tasks', { params }),
-    get: (id) => client.get(`tasks/${id}`),
+    ...crud('tasks'),
+    ...social('tasks'),
     getByRef: (projectId, ref) => client.get('tasks/by_ref', { params: { project: projectId, ref } }),
-    create: (data) => client.post('tasks', data),
-    update: (id, data) => client.patch(`tasks/${id}`, data),
-    delete: (id) => client.delete(`tasks/${id}`),
-    bulkCreate: (projectId, data) => client.post('tasks/bulk_create', { project_id: projectId, ...data }),
-    bulkUpdateTasksOrder: (projectId, data) => client.post('tasks/bulk_update_taskboard_order', { project_id: projectId, ...data }),
+    bulkCreate: (projectId, bulkTasks, extra = {}) => client.post('tasks/bulk_create', { project_id: projectId, bulk_tasks: bulkTasks, ...extra }),
+    // bulkTasks: [{ task_id, order }]; extra: { status_id?, milestone_id? } narrows the set being re-ordered
+    bulkUpdateTaskboardOrder: (projectId, bulkTasks, extra = {}) => client.post('tasks/bulk_update_taskboard_order', { project_id: projectId, bulk_tasks: bulkTasks, ...extra }),
+    bulkUpdateMilestone: (projectId, milestoneId, bulkTasks) => client.post('tasks/bulk_update_milestone', { project_id: projectId, milestone_id: milestoneId, bulk_tasks: bulkTasks }),
     getFiltersData: (projectId) => client.get('tasks/filters_data', { params: { project: projectId } }),
-
-    // Voting
-    upvote: (id) => client.post(`tasks/${id}/upvote`),
-    downvote: (id) => client.post(`tasks/${id}/downvote`),
-
-    // Watching
-    watch: (id) => client.post(`tasks/${id}/watch`),
-    unwatch: (id) => client.post(`tasks/${id}/unwatch`),
-
-    // Attachments
-    getAttachments: (id) => client.get('task-attachments', { params: { object_id: id } }),
+    promoteToUserStory: (id, projectId) => client.post(`tasks/${id}/promote_to_user_story`, { project_id: projectId }),
+    attachments: attachments('tasks'),
+    customAttributes: customAttributes('task-custom-attributes', 'tasks/custom-attributes-values'),
 };
 
 // ============================================
-// ISSUES SERVICE
+// ISSUES
 // ============================================
 export const issueService = {
-    list: (params) => client.get('issues', { params }),
-    get: (id) => client.get(`issues/${id}`),
+    ...crud('issues'),
+    ...social('issues'),
     getByRef: (projectId, ref) => client.get('issues/by_ref', { params: { project: projectId, ref } }),
-    create: (data) => client.post('issues', data),
-    update: (id, data) => client.patch(`issues/${id}`, data),
-    delete: (id) => client.delete(`issues/${id}`),
-    bulkCreate: (projectId, data) => client.post('issues/bulk_create', { project_id: projectId, ...data }),
-    getFiltersData: (projectId) => client.get('issues/filters_data', { params: { project: projectId } }),
-
-    // Voting
-    upvote: (id) => client.post(`issues/${id}/upvote`),
-    downvote: (id) => client.post(`issues/${id}/downvote`),
-
-    // Watching
-    watch: (id) => client.post(`issues/${id}/watch`),
-    unwatch: (id) => client.post(`issues/${id}/unwatch`),
-
-    // Attachments
-    getAttachments: (id) => client.get('issue-attachments', { params: { object_id: id } }),
-
-    // Promote to User Story
+    bulkCreate: (projectId, bulkIssues) => client.post('issues/bulk_create', { project_id: projectId, bulk_issues: bulkIssues }),
+    getFiltersData: (projectId, params = {}) => client.get('issues/filters_data', { params: { ...params, project: projectId } }),
     promoteToUserStory: (id, projectId) => client.post(`issues/${id}/promote_to_user_story`, { project_id: projectId }),
+    attachments: attachments('issues'),
+    customAttributes: customAttributes('issue-custom-attributes', 'issues/custom-attributes-values'),
 };
 
 // ============================================
-// MILESTONES SERVICE
+// MILESTONES (sprints)
 // ============================================
 export const milestoneService = {
-    list: (params) => client.get('milestones', { params }),
-    get: (id) => client.get(`milestones/${id}`),
-    create: (data) => client.post('milestones', data),
-    update: (id, data) => client.patch(`milestones/${id}`, data),
-    delete: (id) => client.delete(`milestones/${id}`),
+    ...crud('milestones'),
     getStats: (id) => client.get(`milestones/${id}/stats`),
     watch: (id) => client.post(`milestones/${id}/watch`),
     unwatch: (id) => client.post(`milestones/${id}/unwatch`),
+    getWatchers: (id) => client.get(`milestones/${id}/watchers`),
 };
 
 // ============================================
-// EPICS SERVICE
-// ============================================
-export const epicService = {
-    list: (params) => client.get('epics', { params }),
-    get: (id) => client.get(`epics/${id}`),
-    create: (data) => client.post('epics', data),
-    update: (id, data) => client.patch(`epics/${id}`, data),
-    delete: (id) => client.delete(`epics/${id}`),
-    bulkCreate: (projectId, data) => client.post('epics/bulk_create', { project_id: projectId, ...data }),
-    getFiltersData: (projectId) => client.get('epics/filters_data', { params: { project: projectId } }),
-    getRelatedUserStories: (id) => client.get(`epics/${id}/related_userstories`),
-    createRelatedUserStory: (id, data) => client.post(`epics/${id}/related_userstories`, data),
-    bulkCreateRelatedUserStories: (id, data) => client.post(`epics/${id}/related_userstories/bulk_create`, data),
-
-    // Voting
-    upvote: (id) => client.post(`epics/${id}/upvote`),
-    downvote: (id) => client.post(`epics/${id}/downvote`),
-
-    // Watching
-    watch: (id) => client.post(`epics/${id}/watch`),
-    unwatch: (id) => client.post(`epics/${id}/unwatch`),
-};
-
-// ============================================
-// WIKI SERVICE
+// WIKI
 // ============================================
 export const wikiService = {
-    // Pages
-    listPages: (params) => client.get('wiki', { params }),
+    listPages: (projectId) => client.get('wiki', { params: { project: projectId } }),
     getPage: (id) => client.get(`wiki/${id}`),
     getPageBySlug: (projectId, slug) => client.get('wiki/by_slug', { params: { project: projectId, slug } }),
-    createPage: (data) => client.post('wiki', data),
-    updatePage: (id, data) => client.patch(`wiki/${id}`, data),
+    createPage: (data) => client.post('wiki', data), // { project, slug, content }
+    updatePage: (id, data) => client.patch(`wiki/${id}`, data), // { content, version }
     deletePage: (id) => client.delete(`wiki/${id}`),
+    renderMarkdown: (projectId, content) => client.post('wiki/render', { project_id: projectId, content }),
     watchPage: (id) => client.post(`wiki/${id}/watch`),
     unwatchPage: (id) => client.post(`wiki/${id}/unwatch`),
+    getWatchers: (id) => client.get(`wiki/${id}/watchers`),
 
-    // Links
-    listLinks: (params) => client.get('wiki-links', { params }),
-    getLink: (id) => client.get(`wiki-links/${id}`),
-    createLink: (data) => client.post('wiki-links', data),
+    listLinks: (projectId) => client.get('wiki-links', { params: { project: projectId } }),
+    createLink: (data) => client.post('wiki-links', data), // { project, title, href }
     updateLink: (id, data) => client.patch(`wiki-links/${id}`, data),
     deleteLink: (id) => client.delete(`wiki-links/${id}`),
 
-    // Attachments
-    getAttachments: (id) => client.get('wiki-attachments', { params: { object_id: id } }),
+    attachments: attachments('wiki'),
 };
 
 // ============================================
-// HISTORY SERVICE
+// HISTORY & COMMENTS
+// type: 'epic' | 'userstory' | 'task' | 'issue' | 'wiki'
 // ============================================
 export const historyService = {
-    getUserStoryHistory: (id) => client.get(`history/userstory/${id}`),
-    getTaskHistory: (id) => client.get(`history/task/${id}`),
-    getIssueHistory: (id) => client.get(`history/issue/${id}`),
-    getEpicHistory: (id) => client.get(`history/epic/${id}`),
-    getWikiHistory: (id) => client.get(`history/wiki/${id}`),
-
-    deleteComment: (type, objectId, commentId) => client.delete(`history/${type}/${objectId}/delete_comment`, { params: { id: commentId } }),
-    undeleteComment: (type, objectId, commentId) => client.post(`history/${type}/${objectId}/undelete_comment`, { id: commentId }),
-    editComment: (type, objectId, commentId, comment) => client.post(`history/${type}/${objectId}/edit_comment`, { id: commentId, comment }),
+    get: (type, id, params) => client.get(`history/${type}/${id}`, { params }),
+    getComments: (type, id) => client.get(`history/${type}/${id}`, { params: { type: 'comment' } }),
+    getActivity: (type, id) => client.get(`history/${type}/${id}`, { params: { type: 'activity' } }),
+    editComment: (type, id, commentId, comment) => client.post(`history/${type}/${id}/edit_comment`, { comment }, { params: { id: commentId } }),
+    deleteComment: (type, id, commentId) => client.post(`history/${type}/${id}/delete_comment`, null, { params: { id: commentId } }),
+    undeleteComment: (type, id, commentId) => client.post(`history/${type}/${id}/undelete_comment`, null, { params: { id: commentId } }),
+    getCommentVersions: (type, id, commentId) => client.get(`history/${type}/${id}/comment_versions`, { params: { id: commentId } }),
 };
 
 // ============================================
-// USER STORAGE SERVICE
+// PROJECT VALUES (statuses, points, priorities, severities, types, swimlanes, due dates)
+// ============================================
+export const epicStatusService = projectValues('epic-statuses');
+export const usStatusService = projectValues('userstory-statuses');
+export const taskStatusService = projectValues('task-statuses');
+export const issueStatusService = projectValues('issue-statuses');
+export const issueTypeService = projectValues('issue-types');
+export const priorityService = projectValues('priorities');
+export const severityService = projectValues('severities');
+export const pointsService = projectValues('points');
+export const swimlaneService = projectValues('swimlanes'); // bulk_swimlanes; moveTo optional when it is the last swimlane
+export const usDueDateService = crud('userstory-due-dates');
+export const taskDueDateService = crud('task-due-dates');
+export const issueDueDateService = crud('issue-due-dates');
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+export const notificationService = {
+    // In-app notifications (bell)
+    list: (params) => client.get('web-notifications', { params }),
+    markAllRead: () => client.post('web-notifications/set-as-read'),
+    markRead: (id) => client.patch(`web-notifications/${id}/set-as-read`),
+    // Per-project email notification level: 1 = involved, 2 = all, 3 = none
+    listPolicies: () => client.get('notify-policies'),
+    updatePolicy: (id, notifyLevel) => client.patch(`notify-policies/${id}`, { notify_level: notifyLevel }),
+};
+
+// ============================================
+// TIMELINE (activity feeds)
+// ============================================
+export const timelineService = {
+    getProfile: (userId, params) => client.get(`timeline/profile/${userId}`, { params }),
+    getUser: (userId, params) => client.get(`timeline/user/${userId}`, { params }),
+    getProject: (projectId, params) => client.get(`timeline/project/${projectId}`, { params }),
+};
+
+// ============================================
+// SEARCH & RESOLVER
+// ============================================
+export const searchService = {
+    // Returns { epics, userstories, tasks, issues, wikipages, count }
+    search: (projectId, text) => client.get('search', { params: { project: projectId, text } }),
+};
+
+export const resolverService = {
+    resolveProject: (slug) => client.get('resolver', { params: { project: slug } }),
+    resolveRef: (slug, ref) => client.get('resolver', { params: { project: slug, ref } }),
+};
+
+// ============================================
+// USER STORAGE (per-user key/value settings)
 // ============================================
 export const userStorageService = {
     list: () => client.get('user-storage'),
     get: (key) => client.get(`user-storage/${key}`),
-    create: (data) => client.post('user-storage', data),
-    update: (key, data) => client.patch(`user-storage/${key}`, data),
+    create: (key, value) => client.post('user-storage', { key, value }),
+    update: (key, value) => client.patch(`user-storage/${key}`, { value }),
     delete: (key) => client.delete(`user-storage/${key}`),
 };
 
 // ============================================
-// PRIORITIES SERVICE
+// WEBHOOKS
 // ============================================
-export const priorityService = {
-    list: (params) => client.get('priorities', { params }),
-    get: (id) => client.get(`priorities/${id}`),
-    create: (data) => client.post('priorities', data),
-    update: (id, data) => client.patch(`priorities/${id}`, data),
-    delete: (id) => client.delete(`priorities/${id}`),
-    bulkUpdateOrder: (projectId, data) => client.post('priorities/bulk_update_order', { project: projectId, ...data }),
+export const webhookService = {
+    ...crud('webhooks'),
+    test: (id) => client.post(`webhooks/${id}/test`),
+    listLogs: (webhookId) => client.get('webhooklogs', { params: { webhook: webhookId } }),
+    resendLog: (logId) => client.post(`webhooklogs/${logId}/resend`),
 };
 
 // ============================================
-// SEVERITIES SERVICE
+// EXPORT
 // ============================================
-export const severityService = {
-    list: (params) => client.get('severities', { params }),
-    get: (id) => client.get(`severities/${id}`),
-    create: (data) => client.post('severities', data),
-    update: (id, data) => client.patch(`severities/${id}`, data),
-    delete: (id) => client.delete(`severities/${id}`),
-    bulkUpdateOrder: (projectId, data) => client.post('severities/bulk_update_order', { project: projectId, ...data }),
+export const exportService = {
+    exportProject: (projectId) => client.get(`exporter/${projectId}`),
 };
 
-// ============================================
-// ISSUE TYPES SERVICE
-// ============================================
-export const issueTypeService = {
-    list: (params) => client.get('issue-types', { params }),
-    get: (id) => client.get(`issue-types/${id}`),
-    create: (data) => client.post('issue-types', data),
-    update: (id, data) => client.patch(`issue-types/${id}`, data),
-    delete: (id) => client.delete(`issue-types/${id}`),
-    bulkUpdateOrder: (projectId, data) => client.post('issue-types/bulk_update_order', { project: projectId, ...data }),
-};
-
-// ============================================
-// ISSUE STATUSES SERVICE
-// ============================================
-export const issueStatusService = {
-    list: (params) => client.get('issue-statuses', { params }),
-    get: (id) => client.get(`issue-statuses/${id}`),
-    create: (data) => client.post('issue-statuses', data),
-    update: (id, data) => client.patch(`issue-statuses/${id}`, data),
-    delete: (id) => client.delete(`issue-statuses/${id}`),
-    bulkUpdateOrder: (projectId, data) => client.post('issue-statuses/bulk_update_order', { project: projectId, ...data }),
-};
-
-// ============================================
-// TASK STATUSES SERVICE
-// ============================================
-export const taskStatusService = {
-    list: (params) => client.get('task-statuses', { params }),
-    get: (id) => client.get(`task-statuses/${id}`),
-    create: (data) => client.post('task-statuses', data),
-    update: (id, data) => client.patch(`task-statuses/${id}`, data),
-    delete: (id) => client.delete(`task-statuses/${id}`),
-    bulkUpdateOrder: (projectId, data) => client.post('task-statuses/bulk_update_order', { project: projectId, ...data }),
-};
-
-// ============================================
-// US STATUSES SERVICE
-// ============================================
-export const usStatusService = {
-    list: (params) => client.get('userstory-statuses', { params }),
-    get: (id) => client.get(`userstory-statuses/${id}`),
-    create: (data) => client.post('userstory-statuses', data),
-    update: (id, data) => client.patch(`userstory-statuses/${id}`, data),
-    delete: (id) => client.delete(`userstory-statuses/${id}`),
-    bulkUpdateOrder: (projectId, data) => client.post('userstory-statuses/bulk_update_order', { project: projectId, ...data }),
-};
-
-// ============================================
-// POINTS SERVICE
-// ============================================
-export const pointsService = {
-    list: (params) => client.get('points', { params }),
-    get: (id) => client.get(`points/${id}`),
-    create: (data) => client.post('points', data),
-    update: (id, data) => client.patch(`points/${id}`, data),
-    delete: (id) => client.delete(`points/${id}`),
-    bulkUpdateOrder: (projectId, data) => client.post('points/bulk_update_order', { project: projectId, ...data }),
-};
-
-// ============================================
-// TIMELINE SERVICE
-// ============================================
-export const timelineService = {
-    getProfile: (userId) => client.get(`timeline/profile/${userId}`),
-    getUser: (userId) => client.get(`timeline/user/${userId}`),
-    getProject: (projectId) => client.get(`timeline/project/${projectId}`),
-};
-
-// ============================================
-// SEARCH SERVICE
-// ============================================
-export const searchService = {
-    search: (projectId, query) => client.get('search', { params: { project: projectId, text: query } }),
-};
-
-// ============================================
-// RESOLVER SERVICE
-// ============================================
-export const resolverService = {
-    resolve: (project, type, ref) => client.get('resolver', { params: { project, [type]: ref } }),
-};
-
-// Export all services as default object
+// Export all services as a default object
 export default {
     auth: authService,
     users: userService,
     projects: projectService,
+    tenders: tenderService,
+    hr: hrService,
+    remarks: remarkService,
     projectTemplates: projectTemplateService,
     memberships: membershipService,
     roles: roleService,
+    epics: epicService,
     userStories: userStoryService,
     tasks: taskService,
     issues: issueService,
     milestones: milestoneService,
-    epics: epicService,
     wiki: wikiService,
     history: historyService,
-    userStorage: userStorageService,
+    epicStatuses: epicStatusService,
+    usStatuses: usStatusService,
+    taskStatuses: taskStatusService,
+    issueStatuses: issueStatusService,
+    issueTypes: issueTypeService,
     priorities: priorityService,
     severities: severityService,
-    issueTypes: issueTypeService,
-    issueStatuses: issueStatusService,
-    taskStatuses: taskStatusService,
-    usStatuses: usStatusService,
     points: pointsService,
+    swimlanes: swimlaneService,
+    notifications: notificationService,
     timeline: timelineService,
     search: searchService,
     resolver: resolverService,
+    userStorage: userStorageService,
+    webhooks: webhookService,
+    export: exportService,
 };

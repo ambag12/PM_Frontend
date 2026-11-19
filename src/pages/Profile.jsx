@@ -1,308 +1,126 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { FaUser, FaEnvelope, FaLock, FaSave, FaCamera, FaHistory } from 'react-icons/fa';
+import React, { useContext, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { FaCamera, FaTrash, FaAt, FaEnvelope, FaCalendarAlt, FaChartPie, FaHistory, FaEye, FaHeart, FaThumbsUp, FaCog, FaShieldAlt, FaUser } from 'react-icons/fa';
+import { userService } from '../api/services';
 import { AuthContext } from '../context/AuthContext';
-import { userService, timelineService } from '../api/services';
-import { Card, Button, Tabs, Avatar } from '../components/UI';
+import { useToast, useConfirm } from '../context/ToastContext';
+import { Tabs, Loader, EmptyState } from '../components/UI';
+import { useAsyncData } from '../components/settings/hooks';
+import ProfileOverview from '../components/settings/ProfileOverview';
+import ProfileActivity from '../components/settings/ProfileActivity';
+import ProfileItems from '../components/settings/ProfileItems';
+import ProfileSettingsForm from '../components/settings/ProfileSettingsForm';
+import ProfileSecurity from '../components/settings/ProfileSecurity';
+import { formatDate, initials } from '../utils/format';
+import '../styles/settings.css';
+
+const TABS = [
+    { id: 'overview', label: 'Overview', icon: <FaChartPie /> },
+    { id: 'activity', label: 'Activity', icon: <FaHistory /> },
+    { id: 'watching', label: 'Watching', icon: <FaEye /> },
+    { id: 'liked', label: 'Liked', icon: <FaHeart /> },
+    { id: 'voted', label: 'Voted', icon: <FaThumbsUp /> },
+    { id: 'settings', label: 'Settings', icon: <FaCog /> },
+    { id: 'security', label: 'Security', icon: <FaShieldAlt /> },
+];
 
 const Profile = () => {
-    const { user, token } = useContext(AuthContext);
-    const [profile, setProfile] = useState(null);
-    const [timeline, setTimeline] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
-    const [activeTab, setActiveTab] = useState('profile');
-    const [formData, setFormData] = useState({
-        full_name: '',
-        email: '',
-        bio: '',
-        username: '',
-    });
-    const [passwordData, setPasswordData] = useState({
-        current_password: '',
-        new_password: '',
-        confirm_password: '',
-    });
+    const { user, updateUser } = useContext(AuthContext);
+    const toast = useToast();
+    const confirm = useConfirm();
+    const fileRef = useRef(null);
+    const [params, setParams] = useSearchParams();
+    const tab = TABS.some((t) => t.id === params.get('tab')) ? params.get('tab') : 'overview';
+    const [uploading, setUploading] = useState(false);
 
-    useEffect(() => {
-        fetchProfile();
-    }, []);
+    const meQ = useAsyncData(() => userService.getMe().then((r) => r.data), [user?.id]);
+    const me = meQ.data || user;
 
-    const fetchProfile = async () => {
-        try {
-            setLoading(true);
-            const [profileRes, timelineRes] = await Promise.all([
-                userService.getMe(),
-                timelineService.getProfile(user?.id).catch(() => ({ data: [] }))
-            ]);
-            setProfile(profileRes.data);
-            setTimeline(timelineRes.data || []);
-            setFormData({
-                full_name: profileRes.data.full_name || '',
-                email: profileRes.data.email || '',
-                bio: profileRes.data.bio || '',
-                username: profileRes.data.username || '',
-            });
-        } catch (error) {
-            console.error('Error fetching profile:', error);
-        } finally {
-            setLoading(false);
-        }
+    const applyUser = (data) => {
+        meQ.setData((m) => ({ ...(m || {}), ...data }));
+        updateUser({ photo: data.photo, big_photo: data.big_photo, full_name: data.full_name, full_name_display: data.full_name_display, bio: data.bio, lang: data.lang, timezone: data.timezone });
     };
 
-    const handleUpdateProfile = async (e) => {
-        e.preventDefault();
-
-        try {
-            setSaving(true);
-            await userService.updateMe({
-                full_name: formData.full_name,
-                bio: formData.bio,
-            });
-            alert('Profile updated successfully!');
-            fetchProfile();
-        } catch (error) {
-            console.error('Error updating profile:', error);
-            alert('Failed to update profile');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleChangePassword = async (e) => {
-        e.preventDefault();
-
-        if (passwordData.new_password !== passwordData.confirm_password) {
-            alert('New passwords do not match');
+    const onAvatar = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            toast.error('Please choose an image file');
             return;
         }
-
+        setUploading(true);
         try {
-            setSaving(true);
-            await userService.changePassword(
-                passwordData.current_password,
-                passwordData.new_password
-            );
-            alert('Password changed successfully!');
-            setPasswordData({ current_password: '', new_password: '', confirm_password: '' });
-        } catch (error) {
-            console.error('Error changing password:', error);
-            alert(error.response?.data?.message || 'Failed to change password');
+            const res = await userService.changeAvatar(file);
+            applyUser(res.data);
+            toast.success('Profile photo updated');
+        } catch (err) {
+            toast.error(err);
         } finally {
-            setSaving(false);
+            setUploading(false);
         }
     };
 
-    const tabs = [
-        { id: 'profile', label: 'Profile', icon: <FaUser /> },
-        { id: 'security', label: 'Security', icon: <FaLock /> },
-        { id: 'activity', label: 'Activity', icon: <FaHistory /> },
-    ];
+    const removeAvatar = async () => {
+        if (!(await confirm({ title: 'Remove profile photo?', message: 'Your initials will be shown instead.', confirmText: 'Remove', danger: true }))) return;
+        setUploading(true);
+        try {
+            const res = await userService.removeAvatar();
+            applyUser(res.data || { photo: null, big_photo: null });
+            toast.success('Profile photo removed');
+        } catch (err) {
+            toast.error(err);
+        } finally {
+            setUploading(false);
+        }
+    };
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center" style={{ minHeight: '400px' }}>
-                <div className="spinner spinner-lg" />
-            </div>
-        );
-    }
+    if (!me) return <Loader label="Loading your profile…" />;
+    if (meQ.error && !user) return <EmptyState icon={<FaUser />} title="Profile unavailable" description="We could not load your profile. Try again in a moment." />;
+
+    const name = me.full_name_display || me.full_name || me.username;
+    const photo = me.big_photo || me.photo;
 
     return (
         <div>
-            <div className="page-header">
-                <h1 className="page-title">My Profile</h1>
-                <p className="page-subtitle">Manage your account settings and preferences</p>
-            </div>
-
-            {/* Profile Header */}
-            <Card className="mb-6">
-                <div className="flex items-center gap-6">
-                    <div style={{ position: 'relative' }}>
-                        <Avatar
-                            name={profile?.full_name}
-                            src={profile?.photo}
-                            size="xl"
-                            style={{ width: '80px', height: '80px', fontSize: '1.5rem' }}
-                        />
-                        <button
-                            style={{
-                                position: 'absolute',
-                                bottom: 0,
-                                right: 0,
-                                width: '28px',
-                                height: '28px',
-                                borderRadius: '50%',
-                                background: 'var(--primary-600)',
-                                color: 'white',
-                                border: '2px solid white',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                            }}
-                        >
-                            <FaCamera size={10} />
+            <section className="card profile-hero" aria-label="Profile">
+                <div className="profile-cover" />
+                <div className="profile-hero-body">
+                    <div className="profile-avatar-wrap">
+                        <div className="profile-avatar">{photo ? <img src={photo} alt={name} /> : initials(name)}</div>
+                        <input ref={fileRef} type="file" accept="image/*" hidden onChange={onAvatar} />
+                        <button className="profile-avatar-btn" onClick={() => fileRef.current?.click()} disabled={uploading} aria-label="Change profile photo" title="Change photo">
+                            {uploading ? <span className="spinner spinner-sm" /> : <FaCamera size={13} />}
                         </button>
                     </div>
-                    <div>
-                        <h2 className="text-2xl font-semibold">{profile?.full_name}</h2>
-                        <p className="text-muted">@{profile?.username}</p>
-                        <p className="text-sm text-muted mt-1">{profile?.email}</p>
+                    <div className="profile-identity">
+                        <div className="row flex-wrap">
+                            <h1 className="profile-name">{name}</h1>
+                            {me.is_superuser && <span className="badge badge-accent">Superuser</span>}
+                        </div>
+                        <div className="profile-meta">
+                            <span><FaAt /> {me.username}</span>
+                            {me.email && <span><FaEnvelope /> {me.email}</span>}
+                            {me.date_joined && <span><FaCalendarAlt /> Member since {formatDate(me.date_joined, { month: 'long', year: 'numeric' })}</span>}
+                        </div>
+                        {me.bio ? <p className="profile-bio">{me.bio}</p> : <p className="profile-bio text-muted">No bio yet — add one in Settings.</p>}
+                    </div>
+                    <div className="row">
+                        {photo && <button className="btn btn-ghost btn-sm" onClick={removeAvatar} disabled={uploading}><FaTrash /> Remove photo</button>}
+                        <button className="btn btn-secondary btn-sm" onClick={() => setParams({ tab: 'settings' })}><FaCog /> Edit profile</button>
                     </div>
                 </div>
-            </Card>
+            </section>
 
-            {/* Tabs */}
-            <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+            <Tabs tabs={TABS} activeTab={tab} onChange={(id) => setParams(id === 'overview' ? {} : { tab: id }, { replace: true })} />
 
-            {/* Tab Content */}
-            {activeTab === 'profile' && (
-                <Card>
-                    <form onSubmit={handleUpdateProfile}>
-                        <div className="form-group">
-                            <label className="form-label">Full Name</label>
-                            <input
-                                type="text"
-                                className="form-input"
-                                value={formData.full_name}
-                                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Username</label>
-                            <input
-                                type="text"
-                                className="form-input"
-                                value={formData.username}
-                                disabled
-                                style={{ background: 'var(--neutral-100)' }}
-                            />
-                            <p className="text-sm text-muted mt-1">Username cannot be changed</p>
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Email</label>
-                            <input
-                                type="email"
-                                className="form-input"
-                                value={formData.email}
-                                disabled
-                                style={{ background: 'var(--neutral-100)' }}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Bio</label>
-                            <textarea
-                                className="form-input"
-                                value={formData.bio}
-                                onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
-                                rows={4}
-                                placeholder="Tell us about yourself..."
-                            />
-                        </div>
-                        <div className="flex justify-end">
-                            <Button
-                                type="submit"
-                                variant="primary"
-                                icon={<FaSave />}
-                                loading={saving}
-                            >
-                                Save Changes
-                            </Button>
-                        </div>
-                    </form>
-                </Card>
-            )}
-
-            {activeTab === 'security' && (
-                <Card>
-                    <h3 className="text-lg font-semibold mb-4">Change Password</h3>
-                    <form onSubmit={handleChangePassword}>
-                        <div className="form-group">
-                            <label className="form-label">Current Password</label>
-                            <input
-                                type="password"
-                                className="form-input"
-                                value={passwordData.current_password}
-                                onChange={(e) => setPasswordData({ ...passwordData, current_password: e.target.value })}
-                                required
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">New Password</label>
-                            <input
-                                type="password"
-                                className="form-input"
-                                value={passwordData.new_password}
-                                onChange={(e) => setPasswordData({ ...passwordData, new_password: e.target.value })}
-                                required
-                                minLength={6}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Confirm New Password</label>
-                            <input
-                                type="password"
-                                className="form-input"
-                                value={passwordData.confirm_password}
-                                onChange={(e) => setPasswordData({ ...passwordData, confirm_password: e.target.value })}
-                                required
-                            />
-                        </div>
-                        <div className="flex justify-end">
-                            <Button
-                                type="submit"
-                                variant="primary"
-                                icon={<FaLock />}
-                                loading={saving}
-                            >
-                                Update Password
-                            </Button>
-                        </div>
-                    </form>
-                </Card>
-            )}
-
-            {activeTab === 'activity' && (
-                <Card>
-                    <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
-                    {timeline.length === 0 ? (
-                        <div className="text-center py-8">
-                            <FaHistory size={48} style={{ color: 'var(--neutral-300)', marginBottom: '1rem' }} />
-                            <p className="text-muted">No recent activity</p>
-                        </div>
-                    ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                            {timeline.slice(0, 20).map((item, index) => (
-                                <div
-                                    key={index}
-                                    style={{
-                                        display: 'flex',
-                                        gap: '1rem',
-                                        paddingBottom: '1rem',
-                                        borderBottom: '1px solid var(--border-light)',
-                                    }}
-                                >
-                                    <div
-                                        style={{
-                                            width: '8px',
-                                            height: '8px',
-                                            borderRadius: '50%',
-                                            background: 'var(--primary-500)',
-                                            marginTop: '0.5rem',
-                                            flexShrink: 0,
-                                        }}
-                                    />
-                                    <div>
-                                        <p className="text-sm">{item.data?.comment || item.event_type || 'Activity'}</p>
-                                        <p className="text-xs text-muted mt-1">
-                                            {new Date(item.created).toLocaleDateString()} at {new Date(item.created).toLocaleTimeString()}
-                                        </p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </Card>
-            )}
+            {tab === 'overview' && <ProfileOverview userId={me.id} />}
+            {tab === 'activity' && <ProfileActivity userId={me.id} />}
+            {tab === 'watching' && <ProfileItems key="watched" userId={me.id} kind="watched" />}
+            {tab === 'liked' && <ProfileItems key="liked" userId={me.id} kind="liked" />}
+            {tab === 'voted' && <ProfileItems key="voted" userId={me.id} kind="voted" />}
+            {tab === 'settings' && (meQ.data ? <ProfileSettingsForm key={meQ.data.id} me={meQ.data} onSaved={(data) => data && applyUser(data)} /> : <Loader />)}
+            {tab === 'security' && (meQ.data ? <ProfileSecurity me={meQ.data} /> : <Loader />)}
         </div>
     );
 };

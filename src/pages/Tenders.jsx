@@ -1,18 +1,23 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
-import TendersComponent from '../components/Tenders';
+import { FaFileContract } from 'react-icons/fa';
+import TendersBoard from '../components/Tenders';
 
+// Serves both /tenders (all of my projects) and /project/:id/tenders (one project).
 const Tenders = () => {
     const { id: projectId } = useParams();
-
     return (
-        <div className="container py-8">
-            <div className="page-header">
-                <h1 className="page-title">Tenders</h1>
-                <p className="page-subtitle">Manage project tenders and contracts</p>
-            </div>
-            <TendersComponent projectId={projectId} />
-        </div>
+        <TendersBoard
+            key={projectId || 'all'}
+            projectId={projectId}
+            header={{
+                title: projectId ? 'Tenders' : 'All tenders',
+                icon: <FaFileContract />,
+                subtitle: projectId
+                    ? 'Procurement packages, bid openings and committee remarks for this project'
+                    : 'Procurement packages across all your projects',
+            }}
+        />
     );
 };
 

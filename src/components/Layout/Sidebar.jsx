@@ -1,237 +1,149 @@
-import React, { useState, useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { AuthContext } from '../../context/AuthContext';
 import {
-    FaHome,
-    FaFolder,
-    FaPlus,
-    FaCog,
-    FaSignOutAlt,
-    FaChevronLeft,
-    FaChevronRight,
-    FaUsers,
-    FaUserShield,
-    FaClipboardList,
-    FaTasks,
-    FaBug,
-    FaFlag,
-    FaBook,
-    FaChartBar,
-    FaFileInvoiceDollar,
-    FaUserTie,
-    FaSearch,
-    FaComment
+    FaHome, FaPlus, FaCog, FaChevronLeft, FaChevronRight, FaUsers, FaUserShield, FaClipboardList,
+    FaColumns, FaBug, FaFlagCheckered, FaBook, FaChartPie, FaFileContract, FaUserTie, FaSearch,
+    FaCommentDots, FaLayerGroup, FaStream, FaBell,
 } from 'react-icons/fa';
+import { AuthContext } from '../../context/AuthContext';
+import { useProject } from '../../context/ProjectContext';
+import { usePermissions } from '../../context/PermissionContext';
 import CreateRemarksModal from '../CreateRemarksModal';
+import Logo from '../UI/Logo';
+import { initials } from '../../utils/format';
 
-const Sidebar = ({ collapsed, onToggle }) => {
-    const { user, logout } = useContext(AuthContext);
+const NavItem = ({ to, icon, label, end, badge, collapsed }) => (
+    <NavLink
+        to={to}
+        end={end}
+        className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+        title={collapsed ? label : undefined}
+    >
+        <span className="nav-item-icon">{icon}</span>
+        <span className="nav-item-label">{label}</span>
+        {badge !== undefined && badge !== null && <span className="nav-badge">{badge}</span>}
+    </NavLink>
+);
+
+const Sidebar = ({ collapsed, onToggle, className = '' }) => {
+    const { user } = useContext(AuthContext);
+    const { project, projectId } = useProject();
+    const { isAdmin, isOwner } = usePermissions();
     const location = useLocation();
     const navigate = useNavigate();
-    const [projectMenuOpen, setProjectMenuOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [showRemarksModal, setShowRemarksModal] = useState(false);
 
-    const handleLogout = () => {
-        logout();
-        navigate('/login');
-    };
+    const base = projectId ? `/project/${projectId}` : null;
+    // Taiga feature toggles default to "on" until the project has loaded
+    const on = (flag) => (project ? project[flag] !== false : true);
 
-    const getInitials = (name) => {
-        if (!name) return 'U';
-        return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-    };
-
-    const coreNavItems = [
-        { path: '/', icon: <FaHome />, label: 'Dashboard' },
-        { path: '/create-project', icon: <FaPlus />, label: 'New Project' },
-    ];
-
-    const moduleNavItems = [
-        { path: '/tenders', icon: <FaFileInvoiceDollar />, label: 'Tenders' },
-        { path: '/hr', icon: <FaUserTie />, label: 'HR Management' },
-    ];
-
-    const adminNavItems = [
-        { path: '/admin', icon: <FaUserShield />, label: 'Admin Panel', requireAdmin: true },
-    ];
-
-    const isActive = (path) => {
-        if (path === '/') return location.pathname === '/';
-        return location.pathname.startsWith(path);
+    const onSearch = (e) => {
+        e.preventDefault();
+        const q = searchTerm.trim();
+        if (!q) return;
+        navigate(base ? `${base}/search?q=${encodeURIComponent(q)}` : `/?q=${encodeURIComponent(q)}`);
+        setSearchTerm('');
     };
 
     return (
-        <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
-            {/* Logo & Header */}
+        <aside className={`sidebar ${collapsed ? 'collapsed' : ''} ${className}`}>
             <div className="sidebar-header">
-                <div className="sidebar-logo">
-                    <FaClipboardList />
-                </div>
-                <span className="sidebar-title">Project Manager</span>
+                <div className="sidebar-logo"><Logo size={34} /></div>
+                <span className="sidebar-title">
+                    SocketSoft PM
+                    <small>Planning · Delivery · Oversight</small>
+                </span>
             </div>
 
-            {/* Toggle Button */}
-            <button
-                className="sidebar-toggle"
-                onClick={onToggle}
-                title={collapsed ? 'Expand' : 'Collapse'}
-            >
-                {collapsed ? <FaChevronRight size={12} /> : <FaChevronLeft size={12} />}
+            <button className="sidebar-toggle" onClick={onToggle} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-label="Toggle sidebar">
+                {collapsed ? <FaChevronRight size={10} /> : <FaChevronLeft size={10} />}
             </button>
 
-            {/* Navigation */}
-            <nav className="sidebar-nav">
-                {/* Core Navigation */}
-                <div className="nav-section">
-                    <span className="nav-section-title">Core</span>
-                    {coreNavItems.map((item) => (
-                        <NavLink
-                            key={item.path}
-                            to={item.path}
-                            className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon">{item.icon}</span>
-                            <span className="nav-item-label">{item.label}</span>
-                        </NavLink>
-                    ))}
+            {base && (
+                <div className="sidebar-project" title={project?.name}>
+                    <div className="sidebar-project-logo">
+                        {project?.logo_small_url ? <img src={project.logo_small_url} alt="" /> : initials(project?.name || '…')}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                        <div className="sidebar-project-name">{project?.name || 'Loading…'}</div>
+                        <div className="sidebar-project-meta">
+                            {project ? `${project.total_memberships ?? project.members?.length ?? 0} members · ${project.is_private ? 'Private' : 'Public'}` : ' '}
+                        </div>
+                    </div>
                 </div>
+            )}
 
-                {/* Project Navigation (shown when in a project) */}
-                {location.pathname.includes('/project/') && (
+            <nav className="sidebar-nav">
+                {base && (
                     <div className="nav-section">
-                        <span className="nav-section-title">Current Project</span>
-                        <NavLink
-                            to={location.pathname.split('/').slice(0, 3).join('/')}
-                            className={`nav-item ${location.pathname.match(/^\/project\/\d+$/) ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon"><FaChartBar /></span>
-                            <span className="nav-item-label">Overview</span>
-                        </NavLink>
-                        <NavLink
-                            to={`${location.pathname.split('/').slice(0, 3).join('/')}/backlog`}
-                            className={`nav-item ${location.pathname.includes('/backlog') ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon"><FaClipboardList /></span>
-                            <span className="nav-item-label">Backlog</span>
-                        </NavLink>
-                        <NavLink
-                            to={`${location.pathname.split('/').slice(0, 3).join('/')}/kanban`}
-                            className={`nav-item ${location.pathname.includes('/kanban') ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon"><FaTasks /></span>
-                            <span className="nav-item-label">Kanban Board</span>
-                        </NavLink>
-                        <NavLink
-                            to={`${location.pathname.split('/').slice(0, 3).join('/')}/issues`}
-                            className={`nav-item ${location.pathname.includes('/issues') ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon"><FaBug /></span>
-                            <span className="nav-item-label">Issues</span>
-                        </NavLink>
-                        <NavLink
-                            to={`${location.pathname.split('/').slice(0, 3).join('/')}/milestones`}
-                            className={`nav-item ${location.pathname.includes('/milestones') ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon"><FaFlag /></span>
-                            <span className="nav-item-label">Milestones</span>
-                        </NavLink>
-                        <NavLink
-                            to={`${location.pathname.split('/').slice(0, 3).join('/')}/wiki`}
-                            className={`nav-item ${location.pathname.includes('/wiki') ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon"><FaBook /></span>
-                            <span className="nav-item-label">Wiki</span>
-                        </NavLink>
-                        <NavLink
-                            to={`${location.pathname.split('/').slice(0, 3).join('/')}/members`}
-                            className={`nav-item ${location.pathname.includes('/members') ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon"><FaUsers /></span>
-                            <span className="nav-item-label">Members</span>
-                        </NavLink>
+                        <span className="nav-section-title">Project</span>
+                        <NavItem collapsed={collapsed} to={base} end icon={<FaChartPie />} label="Overview" />
+                        {on('is_epics_activated') && <NavItem collapsed={collapsed} to={`${base}/epics`} icon={<FaLayerGroup />} label="Epics" />}
+                        {on('is_backlog_activated') && <NavItem collapsed={collapsed} to={`${base}/backlog`} icon={<FaClipboardList />} label="Backlog" />}
+                        {on('is_kanban_activated') && <NavItem collapsed={collapsed} to={`${base}/kanban`} icon={<FaColumns />} label="Kanban" />}
+                        {on('is_backlog_activated') && <NavItem collapsed={collapsed} to={`${base}/milestones`} icon={<FaFlagCheckered />} label="Sprints" badge={project?.milestones?.filter((m) => !m.closed).length || null} />}
+                        {on('is_issues_activated') && <NavItem collapsed={collapsed} to={`${base}/issues`} icon={<FaBug />} label="Issues" />}
+                        {on('is_wiki_activated') && <NavItem collapsed={collapsed} to={`${base}/wiki`} icon={<FaBook />} label="Wiki" />}
+                        <NavItem collapsed={collapsed} to={`${base}/tenders`} icon={<FaFileContract />} label="Tenders" />
+                        <NavItem collapsed={collapsed} to={`${base}/hr`} icon={<FaUserTie />} label="HR & staffing" />
+                        <NavItem collapsed={collapsed} to={`${base}/activity`} icon={<FaStream />} label="Activity" />
+                        <NavItem collapsed={collapsed} to={`${base}/members`} icon={<FaUsers />} label="Team" />
+                        {(isAdmin || isOwner) && <NavItem collapsed={collapsed} to={`${base}/settings`} icon={<FaCog />} label="Settings" />}
                     </div>
                 )}
 
-                {/* Modules Navigation */}
                 <div className="nav-section">
-                    <span className="nav-section-title">Modules</span>
-                    {moduleNavItems.map((item) => (
-                        <NavLink
-                            key={item.path}
-                            to={item.path}
-                            className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon">{item.icon}</span>
-                            <span className="nav-item-label">{item.label}</span>
-                        </NavLink>
-                    ))}
-
-                    {/* Remarks Button */}
-                    <div
-                        className="nav-item"
-                        onClick={() => setShowRemarksModal(true)}
-                        style={{ cursor: 'pointer' }}
-                    >
-                        <span className="nav-item-icon"><FaComment /></span>
-                        <span className="nav-item-label">Remarks</span>
-                    </div>
+                    <span className="nav-section-title">Workspace</span>
+                    <NavItem collapsed={collapsed} to="/" end icon={<FaHome />} label="Dashboard" />
+                    <NavItem collapsed={collapsed} to="/create-project" icon={<FaPlus />} label="New project" />
+                    <NavItem collapsed={collapsed} to="/notifications" icon={<FaBell />} label="Notifications" />
                 </div>
 
-                {/* Administrative */}
                 <div className="nav-section">
-                    <span className="nav-section-title">Administrative</span>
-                    {adminNavItems.map((item) => (
-                        <NavLink
-                            key={item.path}
-                            to={item.path}
-                            className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
-                        >
-                            <span className="nav-item-icon">{item.icon}</span>
-                            <span className="nav-item-label">{item.label}</span>
-                        </NavLink>
-                    ))}
-                    <NavLink
-                        to="/project/settings"
-                        className={`nav-item ${location.pathname.includes('/settings') ? 'active' : ''}`}
-                    >
-                        <span className="nav-item-icon"><FaCog /></span>
-                        <span className="nav-item-label">App Settings</span>
-                    </NavLink>
+                    <span className="nav-section-title">Modules</span>
+                    <NavItem collapsed={collapsed} to="/tenders" end icon={<FaFileContract />} label="All tenders" />
+                    <NavItem collapsed={collapsed} to="/hr" end icon={<FaUserTie />} label="All HR records" />
+                    <button className="nav-item w-full" onClick={() => setShowRemarksModal(true)} title={collapsed ? 'Add remark' : undefined}>
+                        <span className="nav-item-icon"><FaCommentDots /></span>
+                        <span className="nav-item-label">Add remark</span>
+                    </button>
+                </div>
+
+                <div className="nav-section">
+                    <span className="nav-section-title">Administration</span>
+                    <NavItem collapsed={collapsed} to="/admin" icon={<FaUserShield />} label="Admin panel" />
                 </div>
             </nav>
 
-            {/* User Profile & Logout */}
             <div className="sidebar-footer">
-                <div className="sidebar-search">
+                <form className="sidebar-search" onSubmit={onSearch}>
                     <FaSearch className="sidebar-search-icon" />
                     <input
                         type="text"
                         className="sidebar-search-input"
-                        placeholder="Search..."
+                        placeholder={base ? 'Search this project…' : 'Search projects…'}
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
-                </div>
+                </form>
 
-                <div className="sidebar-user" onClick={handleLogout}>
+                <div className="sidebar-user" onClick={() => navigate('/profile')} title="My profile" role="button">
                     <div className="sidebar-user-avatar">
-                        {getInitials(user?.full_name)}
+                        {user?.photo ? <img src={user.photo} alt="" /> : initials(user?.full_name || user?.username)}
                     </div>
                     <div className="sidebar-user-info">
-                        <div className="sidebar-user-name">{user?.full_name || 'User'}</div>
-                        <div className="sidebar-user-role">Click to Logout</div>
+                        <div className="sidebar-user-name">{user?.full_name || user?.username || 'User'}</div>
+                        <div className="sidebar-user-role">{location.pathname === '/profile' ? 'Viewing profile' : `@${user?.username || ''}`}</div>
                     </div>
                 </div>
             </div>
 
-            {/* Remarks Modal */}
             {showRemarksModal && (
                 <CreateRemarksModal
+                    projectId={projectId}
                     onClose={() => setShowRemarksModal(false)}
-                    onCreated={() => {
-                        setShowRemarksModal(false);
-                    }}
+                    onCreated={() => setShowRemarksModal(false)}
                 />
             )}
         </aside>

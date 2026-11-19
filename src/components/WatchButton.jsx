@@ -1,61 +1,69 @@
 import React, { useState } from 'react';
-import { FaEye, FaEyeSlash } from 'react-icons/fa';
+import { FaEye, FaRegEye } from 'react-icons/fa';
+import '../styles/work.css';
 
-const WatchButton = ({ 
-  isWatching, 
-  watchersCount = 0, 
-  onWatch, 
-  onUnwatch, 
-  resourceType = 'item' 
+/*
+ * Watch / unwatch toggle with a watcher count.
+ *   <WatchButton isWatching watchersCount={3} onWatch={…} onUnwatch={…} resourceType="task"
+ *                onCountClick={() => …} size="sm" />
+ * onCountClick (optional) turns the count into a button (e.g. to show the watcher list).
+ */
+const WatchButton = ({
+    isWatching,
+    watchersCount = 0,
+    onWatch,
+    onUnwatch,
+    resourceType = 'item',
+    onCountClick,
+    countExpanded,
+    size = 'sm',
+    disabled = false,
 }) => {
-  const [loading, setLoading] = useState(false);
+    const [busy, setBusy] = useState(false);
 
-  const handleToggle = async () => {
-    setLoading(true);
-    try {
-      if (isWatching) {
-        await onUnwatch();
-      } else {
-        await onWatch();
-      }
-    } catch (error) {
-      console.error('Failed to toggle watch status', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const handleToggle = async () => {
+        setBusy(true);
+        try {
+            if (isWatching) await onUnwatch?.();
+            else await onWatch?.();
+        } catch {
+            // the caller reports errors (toast)
+        } finally {
+            setBusy(false);
+        }
+    };
 
-  return (
-    <button
-      onClick={handleToggle}
-      disabled={loading}
-      className="btn"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        padding: '0.5rem 1rem',
-        background: isWatching ? 'rgba(0, 122, 255, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-        color: isWatching ? 'var(--primary)' : 'var(--text-secondary)',
-        border: '1px solid ' + (isWatching ? 'var(--primary)' : 'transparent'),
-        fontSize: '0.9rem'
-      }}
-      title={isWatching ? `Unwatch this ${resourceType}` : `Watch this ${resourceType}`}
-    >
-      {isWatching ? <FaEye /> : <FaEyeSlash />}
-      <span>{isWatching ? 'Watching' : 'Watch'}</span>
-      {watchersCount > 0 && (
-        <span style={{ 
-          background: 'rgba(255, 255, 255, 0.1)', 
-          padding: '0.15rem 0.5rem', 
-          borderRadius: '10px',
-          fontSize: '0.8rem'
-        }}>
-          {watchersCount}
+    const sizeClass = size === 'sm' ? 'btn-sm' : '';
+    return (
+        <span className="split-btn">
+            <button
+                type="button"
+                onClick={handleToggle}
+                disabled={busy || disabled}
+                className={`btn btn-secondary ${sizeClass} ${isWatching ? 'is-on' : ''}`}
+                aria-pressed={!!isWatching}
+                title={isWatching ? `Stop watching this ${resourceType}` : `Get notified about changes to this ${resourceType}`}
+            >
+                {busy ? <span className="spinner spinner-sm" /> : isWatching ? <FaEye /> : <FaRegEye />}
+                <span>{isWatching ? 'Watching' : 'Watch'}</span>
+            </button>
+            {onCountClick ? (
+                <button
+                    type="button"
+                    className={`btn btn-secondary ${sizeClass} split-btn-count`}
+                    onClick={onCountClick}
+                    aria-expanded={!!countExpanded}
+                    aria-label={`${watchersCount} watcher${watchersCount === 1 ? '' : 's'} — show list`}
+                >
+                    {watchersCount}
+                </button>
+            ) : (
+                <span className={`btn btn-secondary ${sizeClass} split-btn-count is-static`} aria-label={`${watchersCount} watchers`}>
+                    {watchersCount}
+                </span>
+            )}
         </span>
-      )}
-    </button>
-  );
+    );
 };
 
 export default WatchButton;

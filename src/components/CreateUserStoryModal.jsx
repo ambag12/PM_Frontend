@@ -1,215 +1,201 @@
-import React, { useState, useEffect } from 'react';
-import client from '../api/client';
-import { FaTimes } from 'react-icons/fa';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { epicService, userStoryService } from '../api/services';
+import { getErrorMessage } from '../api/client';
+import { useToast } from '../context/ToastContext';
+import { Modal, Field, Loader } from './UI';
+import TagEditor from './work/TagEditor';
+import { CreateFooter, CreatedNote, PeoplePicker } from './work/FormBits';
+import { useProjectData } from './work/useWorkItem';
+import { statusOptions } from './work/workTypes';
 
-const CreateUserStoryModal = ({ projectId, onClose, onStoryCreated }) => {
-  const [statuses, setStatuses] = useState([]);
-  const [milestones, setMilestones] = useState([]);
-  const [formData, setFormData] = useState({
+const emptyForm = (project, { statusId, milestoneId, epicId }) => ({
     subject: '',
     description: '',
-    tags: '',
-    status: '',
-    milestone: '',
-  });
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+    status: statusId ?? project.default_us_status ?? project.us_statuses?.[0]?.id ?? '',
+    assigned_users: [],
+    tags: [],
+    milestone: milestoneId ?? '',
+    epic: epicId ?? '',
+    points: {},
+});
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Fetch statuses
-        const statusRes = await client.get(`userstory-statuses?project=${projectId}`);
-        setStatuses(statusRes.data);
-        if (statusRes.data.length > 0) {
-          setFormData(prev => ({ ...prev, status: statusRes.data[0].id }));
+const StoryForm = ({ project, projectId, formId, setBusy, onStoryCreated, onClose, milestoneId, statusId, epicId }) => {
+    const toast = useToast();
+    const subjectRef = useRef(null);
+    const ids = useId();
+    const [form, setForm] = useState(() => emptyForm(project, { statusId, milestoneId, epicId }));
+    const [errors, setErrors] = useState({});
+    const [apiError, setApiError] = useState('');
+    const [created, setCreated] = useState('');
+    const [showPoints, setShowPoints] = useState(false);
+    const [epics, setEpics] = useState([]);
+    const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+    useEffect(() => {
+        if (project.is_epics_activated === false) return undefined;
+        let off = false;
+        epicService.list({ project: projectId }).then((res) => { if (!off) setEpics(res.data || []); }).catch(() => {});
+        return () => { off = true; };
+    }, [projectId, project.is_epics_activated]);
+
+    const roles = (project.roles || []).filter((r) => r.computable);
+    const points = [...(project.points || [])].sort((a, b) => a.order - b.order);
+    const sprints = (project.milestones || []).filter((m) => !m.closed || String(m.id) === String(form.milestone));
+
+    const submit = async (e) => {
+        e.preventDefault();
+        const another = e.nativeEvent?.submitter?.value === 'another';
+        const subject = form.subject.trim();
+        if (!subject) {
+            setErrors({ subject: 'Give the story a subject.' });
+            subjectRef.current?.focus();
+            return;
         }
-
-        // Fetch milestones
-        const milestonesRes = await client.get(`milestones?project=${projectId}`);
-        setMilestones(milestonesRes.data);
-      } catch (err) {
-        console.error("Failed to fetch data", err);
-      }
+        setErrors({});
+        setApiError('');
+        setBusy(true);
+        try {
+            const payload = {
+                project: Number(projectId),
+                subject,
+                description: form.description,
+                status: form.status ? Number(form.status) : undefined,
+                tags: form.tags,
+                assigned_users: form.assigned_users,
+                assigned_to: form.assigned_users[0] ?? null,
+                milestone: form.milestone ? Number(form.milestone) : null,
+            };
+            const pts = Object.fromEntries(Object.entries(form.points).filter(([, v]) => v));
+            if (Object.keys(pts).length) payload.points = pts;
+            const res = await userStoryService.create(payload);
+            let story = res.data;
+            if (form.epic) {
+                try {
+                    await epicService.addRelated(Number(form.epic), story.id);
+                    story = (await userStoryService.get(story.id)).data;
+                } catch (err) {
+                    toast.warning(`Story created, but linking it to the epic failed: ${getErrorMessage(err)}`);
+                }
+            }
+            onStoryCreated?.(story);
+            if (another) {
+                setForm((f) => ({ ...f, subject: '', description: '', points: {} }));
+                setCreated(`User story #${story.ref} created. Add the next one.`);
+                subjectRef.current?.focus();
+            } else {
+                toast.success(`User story #${story.ref} created`);
+                onClose();
+            }
+        } catch (err) {
+            setApiError(getErrorMessage(err, 'Could not create the user story.'));
+        } finally {
+            setBusy(false);
+        }
     };
 
-    fetchData();
-  }, [projectId]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError('');
-
-    try {
-      const payload = {
-        project: parseInt(projectId),
-        subject: formData.subject,
-        description: formData.description,
-      };
-
-      if (formData.status) {
-        payload.status = parseInt(formData.status);
-      }
-
-      if (formData.milestone) {
-        payload.milestone = parseInt(formData.milestone);
-      }
-
-      if (formData.tags) {
-        payload.tags = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
-      }
-
-      await client.post('userstories', payload);
-      onStoryCreated();
-      onClose();
-    } catch (err) {
-      console.error("Failed to create user story", err);
-      setError(err.response?.data?._error_message || "Failed to create user story.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.7)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: '1rem',
-      overflowY: 'auto'
-    }}>
-      <div className="card" style={{ maxWidth: '600px', width: '100%', position: 'relative', margin: '2rem auto' }}>
-        <button 
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: '1rem',
-            right: '1rem',
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: '1.2rem'
-          }}
-        >
-          <FaTimes />
-        </button>
-
-        <h3 style={{ marginBottom: '1.5rem' }}>Create New User Story</h3>
-
-        {error && (
-          <div style={{ 
-            background: 'rgba(255, 59, 48, 0.1)', 
-            border: '1px solid var(--error)', 
-            color: 'var(--error)', 
-            padding: '1rem', 
-            borderRadius: '8px',
-            marginBottom: '1.5rem'
-          }}>
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit}>
-          <div className="input-group">
-            <label className="input-label">Story Title *</label>
-            <input
-              type="text"
-              className="input-field"
-              value={formData.subject}
-              onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-              placeholder="As a user, I want to..."
-              required
-              autoFocus
-            />
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Description</label>
-            <textarea
-              className="input-field"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Describe the user story in detail..."
-              rows="4"
-            />
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Status</label>
-            <select
-              className="input-field"
-              value={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-              style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-            >
-              <option value="">Select status</option>
-              {statuses.map(status => (
-                <option key={status.id} value={status.id}>
-                  {status.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Milestone (Optional)</label>
-            <select
-              className="input-field"
-              value={formData.milestone}
-              onChange={(e) => setFormData({ ...formData, milestone: e.target.value })}
-              style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-            >
-              <option value="">No milestone</option>
-              {milestones.map(milestone => (
-                <option key={milestone.id} value={milestone.id}>
-                  {milestone.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Tags (comma-separated)</label>
-            <input
-              type="text"
-              className="input-field"
-              value={formData.tags}
-              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-              placeholder="e.g., frontend, api, urgent"
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-            <button 
-              type="submit" 
-              className="btn btn-primary" 
-              style={{ flex: 1 }}
-              disabled={submitting}
-            >
-              {submitting ? 'Creating...' : 'Create User Story'}
-            </button>
-            <button 
-              type="button" 
-              onClick={onClose}
-              className="btn"
-              style={{ flex: 1, background: 'var(--bg-secondary)' }}
-            >
-              Cancel
-            </button>
-          </div>
+    return (
+        <form id={formId} onSubmit={submit} noValidate>
+            {created && <CreatedNote text={created} onDismiss={() => setCreated('')} />}
+            {apiError && <div className="alert alert-error mb-4" role="alert">{apiError}</div>}
+            <Field label="Subject" error={errors.subject}>
+                <input
+                    ref={subjectRef}
+                    className="form-input"
+                    value={form.subject}
+                    onChange={(e) => set('subject', e.target.value)}
+                    placeholder="e.g. Prepare BOQ for civil works"
+                    aria-invalid={!!errors.subject}
+                    maxLength={500}
+                    autoFocus
+                />
+            </Field>
+            <Field label="Description" optional hint="Markdown is supported.">
+                <textarea className="form-input" rows={4} value={form.description} onChange={(e) => set('description', e.target.value)} aria-label="Description" />
+            </Field>
+            <div className="form-grid">
+                <Field label="Status">
+                    <select className="form-input" value={form.status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
+                        {statusOptions(project.us_statuses).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                </Field>
+                <Field label="Sprint" optional>
+                    <select className="form-input" value={form.milestone} onChange={(e) => set('milestone', e.target.value)} aria-label="Sprint">
+                        <option value="">Backlog (no sprint)</option>
+                        {sprints.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                </Field>
+                {project.is_epics_activated !== false && (
+                    <Field label="Epic" optional className="span-2">
+                        <select className="form-input" value={form.epic} onChange={(e) => set('epic', e.target.value)} aria-label="Epic">
+                            <option value="">No epic</option>
+                            {epics.map((ep) => <option key={ep.id} value={ep.id}>#{ep.ref} {ep.subject}</option>)}
+                        </select>
+                    </Field>
+                )}
+                <div className="form-group span-2">
+                    <label className="form-label" htmlFor={`${ids}-people`}>Assigned users <span className="optional">(optional)</span></label>
+                    <PeoplePicker id={`${ids}-people`} value={form.assigned_users} members={project.members} onChange={(v) => set('assigned_users', v)} />
+                </div>
+                <div className="form-group span-2">
+                    <span className="form-label">Tags <span className="optional">(optional)</span></span>
+                    <TagEditor value={form.tags} tagsColors={project.tags_colors} onChange={(v) => set('tags', v)} />
+                </div>
+            </div>
+            {roles.length > 0 && (
+                <div className="form-group">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPoints((s) => !s)} aria-expanded={showPoints}>
+                        {showPoints ? '− Hide' : '+ Estimate'} points per role
+                    </button>
+                    {showPoints && (
+                        <div className="points-grid points-grid-form mt-2">
+                            {roles.map((r) => (
+                                <label key={r.id} className="points-cell">
+                                    <span className="points-role">{r.name}</span>
+                                    <select className="form-input form-input-sm" value={form.points[r.id] || ''} onChange={(e) => set('points', { ...form.points, [r.id]: e.target.value ? Number(e.target.value) : '' })}>
+                                        <option value="">—</option>
+                                        {points.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                    </select>
+                                </label>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
         </form>
-      </div>
-    </div>
-  );
+    );
+};
+
+/*
+ * Create a user story.
+ *   <CreateUserStoryModal projectId onClose onStoryCreated={(story) => …} milestoneId? statusId? epicId? />
+ */
+const CreateUserStoryModal = ({ projectId, onClose, onStoryCreated, milestoneId, statusId, epicId }) => {
+    const { project } = useProjectData(projectId);
+    const [busy, setBusy] = useState(false);
+    const formId = `create-us-${useId().replace(/:/g, '')}`;
+    return (
+        <Modal
+            isOpen
+            onClose={busy ? () => {} : onClose}
+            title="New user story"
+            size="lg"
+            footer={<CreateFooter formId={formId} busy={busy || !project} onCancel={onClose} label="Create story" />}
+        >
+            {project ? (
+                <StoryForm
+                    project={project}
+                    projectId={projectId}
+                    formId={formId}
+                    setBusy={setBusy}
+                    onStoryCreated={onStoryCreated}
+                    onClose={onClose}
+                    milestoneId={milestoneId}
+                    statusId={statusId}
+                    epicId={epicId}
+                />
+            ) : <Loader label="Loading project…" />}
+        </Modal>
+    );
 };
 
 export default CreateUserStoryModal;

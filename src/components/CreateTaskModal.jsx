@@ -1,212 +1,178 @@
-import React, { useState, useEffect } from 'react';
-import client from '../api/client';
-import { FaTimes } from 'react-icons/fa';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { taskService, userStoryService } from '../api/services';
+import { getErrorMessage } from '../api/client';
+import { useToast } from '../context/ToastContext';
+import { Modal, Field, Loader } from './UI';
+import TagEditor from './work/TagEditor';
+import { CreateFooter, CreatedNote } from './work/FormBits';
+import { useProjectData } from './work/useWorkItem';
+import { memberOptions, statusOptions } from './work/workTypes';
 
-const CreateTaskModal = ({ projectId, onClose, onTaskCreated }) => {
-  const [milestones, setMilestones] = useState([]);
-  const [members, setMembers] = useState([]);
-  const [formData, setFormData] = useState({
-    subject: '',
-    milestone: '',
-    description: '',
-    assigned_to: '',
-    tags: '',
-  });
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+const TaskForm = ({ project, projectId, formId, setBusy, onTaskCreated, onClose, userStoryId, milestoneId, statusId }) => {
+    const toast = useToast();
+    const subjectRef = useRef(null);
+    const [form, setForm] = useState(() => ({
+        subject: '',
+        description: '',
+        status: statusId ?? project.default_task_status ?? project.task_statuses?.[0]?.id ?? '',
+        user_story: userStoryId ?? '',
+        milestone: milestoneId ?? '',
+        assigned_to: '',
+        tags: [],
+        is_iocaine: false,
+    }));
+    const [errors, setErrors] = useState({});
+    const [apiError, setApiError] = useState('');
+    const [created, setCreated] = useState('');
+    const [stories, setStories] = useState(null);
+    const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await client.get(`milestones?project=${projectId}`);
-        setMilestones(response.data);
+    useEffect(() => {
+        let off = false;
+        userStoryService.list({ project: projectId })
+            .then((res) => { if (!off) setStories(res.data || []); })
+            .catch(() => { if (!off) setStories([]); });
+        return () => { off = true; };
+    }, [projectId]);
 
-        const membersRes = await client.get(`memberships?project=${projectId}`);
-        setMembers(membersRes.data);
-      } catch (err) {
-        console.error("Failed to fetch data", err);
-      }
+    const sprints = (project.milestones || []).filter((m) => !m.closed || String(m.id) === String(form.milestone));
+
+    // Picking a story moves the task into that story's sprint (the usual Taiga behaviour).
+    const pickStory = (value) => {
+        const s = (stories || []).find((x) => String(x.id) === String(value));
+        setForm((f) => ({ ...f, user_story: value, milestone: s ? (s.milestone ?? '') : f.milestone }));
     };
 
-    fetchData();
-  }, [projectId]);
+    const submit = async (e) => {
+        e.preventDefault();
+        const another = e.nativeEvent?.submitter?.value === 'another';
+        const subject = form.subject.trim();
+        if (!subject) {
+            setErrors({ subject: 'Give the task a subject.' });
+            subjectRef.current?.focus();
+            return;
+        }
+        setErrors({});
+        setApiError('');
+        setBusy(true);
+        try {
+            const res = await taskService.create({
+                project: Number(projectId),
+                subject,
+                description: form.description,
+                status: form.status ? Number(form.status) : undefined,
+                user_story: form.user_story ? Number(form.user_story) : null,
+                milestone: form.milestone ? Number(form.milestone) : null,
+                assigned_to: form.assigned_to ? Number(form.assigned_to) : null,
+                tags: form.tags,
+                is_iocaine: form.is_iocaine,
+            });
+            onTaskCreated?.(res.data);
+            if (another) {
+                setForm((f) => ({ ...f, subject: '', description: '' }));
+                setCreated(`Task #${res.data.ref} created. Add the next one.`);
+                subjectRef.current?.focus();
+            } else {
+                toast.success(`Task #${res.data.ref} created`);
+                onClose();
+            }
+        } catch (err) {
+            setApiError(getErrorMessage(err, 'Could not create the task.'));
+        } finally {
+            setBusy(false);
+        }
+    };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError('');
-
-    try {
-      const payload = {
-        project: parseInt(projectId),
-        subject: formData.subject,
-      };
-
-      if (formData.milestone) {
-        payload.milestone = parseInt(formData.milestone);
-      }
-
-      if (formData.description) {
-        payload.description = formData.description;
-      }
-
-      if (formData.assigned_to) {
-        payload.assigned_to = parseInt(formData.assigned_to);
-      }
-
-      if (formData.tags) {
-        payload.tags = formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag);
-      }
-
-      await client.post('tasks', payload);
-      onTaskCreated();
-      onClose();
-    } catch (err) {
-      console.error("Failed to create task", err);
-      setError(err.response?.data?._error_message || "Failed to create task.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.7)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: '1rem'
-    }}>
-      <div className="card" style={{ maxWidth: '500px', width: '100%', position: 'relative' }}>
-        <button 
-          onClick={onClose}
-          style={{
-            position: 'absolute',
-            top: '1rem',
-            right: '1rem',
-            background: 'transparent',
-            border: 'none',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: '1.2rem'
-          }}
-        >
-          <FaTimes />
-        </button>
-
-        <h3 style={{ marginBottom: '1.5rem' }}>Create New Task</h3>
-
-        {error && (
-          <div style={{ 
-            background: 'rgba(255, 59, 48, 0.1)', 
-            border: '1px solid var(--error)', 
-            color: 'var(--error)', 
-            padding: '1rem', 
-            borderRadius: '8px',
-            marginBottom: '1.5rem'
-          }}>
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit}>
-          <div className="input-group">
-            <label className="input-label">Task Title</label>
-            <input
-              type="text"
-              className="input-field"
-              value={formData.subject}
-              onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-              placeholder="e.g., Implement login page"
-              required
-              autoFocus
-            />
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Description (Optional)</label>
-            <textarea
-              className="input-field"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Add task details..."
-              rows="3"
-            />
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Milestone (Optional)</label>
-            <select
-              className="input-field"
-              value={formData.milestone}
-              onChange={(e) => setFormData({ ...formData, milestone: e.target.value })}
-              style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-            >
-              <option value="">No milestone</option>
-              {milestones.map(milestone => (
-                <option key={milestone.id} value={milestone.id}>
-                  {milestone.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Assign To (Optional)</label>
-            <select
-              className="input-field"
-              value={formData.assigned_to}
-              onChange={(e) => setFormData({ ...formData, assigned_to: e.target.value })}
-              style={{ width: '100%', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-            >
-              <option value="">Unassigned</option>
-              {members.map(member => (
-                <option key={member.id} value={member.user}>
-                  {member.full_name || member.user_email}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="input-group">
-            <label className="input-label">Tags (comma-separated)</label>
-            <input
-              type="text"
-              className="input-field"
-              value={formData.tags}
-              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-              placeholder="e.g., bug, urgent, backend"
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-            <button 
-              type="submit" 
-              className="btn btn-primary" 
-              style={{ flex: 1 }}
-              disabled={submitting}
-            >
-              {submitting ? 'Creating...' : 'Create Task'}
-            </button>
-            <button 
-              type="button" 
-              onClick={onClose}
-              className="btn"
-              style={{ flex: 1, background: 'var(--bg-secondary)' }}
-            >
-              Cancel
-            </button>
-          </div>
+    return (
+        <form id={formId} onSubmit={submit} noValidate>
+            {created && <CreatedNote text={created} onDismiss={() => setCreated('')} />}
+            {apiError && <div className="alert alert-error mb-4" role="alert">{apiError}</div>}
+            <Field label="Subject" error={errors.subject}>
+                <input
+                    ref={subjectRef}
+                    className="form-input"
+                    value={form.subject}
+                    onChange={(e) => set('subject', e.target.value)}
+                    placeholder="e.g. Collect quotations from vendors"
+                    aria-invalid={!!errors.subject}
+                    maxLength={500}
+                    autoFocus
+                />
+            </Field>
+            <Field label="Description" optional hint="Markdown is supported.">
+                <textarea className="form-input" rows={4} value={form.description} onChange={(e) => set('description', e.target.value)} aria-label="Description" />
+            </Field>
+            <div className="form-grid">
+                <Field label="User story" optional className="span-2">
+                    <select className="form-input" value={form.user_story} onChange={(e) => pickStory(e.target.value)} disabled={!stories} aria-label="User story">
+                        <option value="">{stories ? 'No user story' : 'Loading stories…'}</option>
+                        {(stories || []).map((s) => <option key={s.id} value={s.id}>#{s.ref} {s.subject}</option>)}
+                    </select>
+                </Field>
+                <Field label="Status">
+                    <select className="form-input" value={form.status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
+                        {statusOptions(project.task_statuses).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                </Field>
+                <Field label="Sprint" optional>
+                    <select className="form-input" value={form.milestone} onChange={(e) => set('milestone', e.target.value)} aria-label="Sprint">
+                        <option value="">No sprint</option>
+                        {sprints.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                </Field>
+                <Field label="Assigned to" optional>
+                    <select className="form-input" value={form.assigned_to} onChange={(e) => set('assigned_to', e.target.value)} aria-label="Assigned to">
+                        <option value="">Unassigned</option>
+                        {memberOptions(project.members).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                </Field>
+                <div className="form-group create-switch">
+                    <label className="switch">
+                        <input type="checkbox" checked={form.is_iocaine} onChange={(e) => set('is_iocaine', e.target.checked)} />
+                        <span className="switch-track" />
+                        <span>Iocaine (hard / risky)</span>
+                    </label>
+                </div>
+                <div className="form-group span-2">
+                    <span className="form-label">Tags <span className="optional">(optional)</span></span>
+                    <TagEditor value={form.tags} tagsColors={project.tags_colors} onChange={(v) => set('tags', v)} />
+                </div>
+            </div>
         </form>
-      </div>
-    </div>
-  );
+    );
+};
+
+/*
+ * Create a task.
+ *   <CreateTaskModal projectId onClose onTaskCreated={(task) => …} userStoryId? milestoneId? statusId? />
+ */
+const CreateTaskModal = ({ projectId, onClose, onTaskCreated, userStoryId, milestoneId, statusId }) => {
+    const { project } = useProjectData(projectId);
+    const [busy, setBusy] = useState(false);
+    const formId = `create-task-${useId().replace(/:/g, '')}`;
+    return (
+        <Modal
+            isOpen
+            onClose={busy ? () => {} : onClose}
+            title="New task"
+            size="lg"
+            footer={<CreateFooter formId={formId} busy={busy || !project} onCancel={onClose} label="Create task" />}
+        >
+            {project ? (
+                <TaskForm
+                    project={project}
+                    projectId={projectId}
+                    formId={formId}
+                    setBusy={setBusy}
+                    onTaskCreated={onTaskCreated}
+                    onClose={onClose}
+                    userStoryId={userStoryId}
+                    milestoneId={milestoneId}
+                    statusId={statusId}
+                />
+            ) : <Loader label="Loading project…" />}
+        </Modal>
+    );
 };
 
 export default CreateTaskModal;

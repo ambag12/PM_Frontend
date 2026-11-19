@@ -1,200 +1,133 @@
-import React, { useState, useRef } from 'react';
-import { FaTimes, FaCalendarAlt } from 'react-icons/fa';
-import client from '../api/client';
+import React, { useState } from 'react';
+import { FaPlus } from 'react-icons/fa';
+import { tenderService, TENDER_STATUSES } from '../api/services';
+import { useToast } from '../context/ToastContext';
+import { getErrorMessage } from '../api/client';
+import { Modal, Field } from './UI';
+import { useMyProjects } from './modules/hooks';
 
-const CreateTenderModal = ({ projectId, onClose, onCreated }) => {
-  const [formData, setFormData] = useState({
-    name_of_tenders: 'NHSP',
-    status: 'not_started',
-    tech_opeining: '',
-    financial_opening: ''
-  });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const techDateRef = useRef(null);
-  const financialDateRef = useRef(null);
+const NAME_MAX = 50;
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
+/*
+ * Create a tender. With `projectId` the project is fixed; otherwise the user picks one
+ * (from `projects`, or from their project list).
+ *   onCreated(tender)
+ */
+const CreateTenderModal = ({ projectId, projects: projectsProp, defaultProjectId, onClose, onCreated, isOpen = true }) => {
+    const toast = useToast();
+    const needPicker = !projectId;
+    const mine = useMyProjects(needPicker && !projectsProp);
+    const projects = projectsProp || mine.projects;
 
-    try {
-      await client.post('projects/create_tenders', {
-        ...formData,
-        project: parseInt(projectId)
-      });
-      onCreated();
-      onClose();
-    } catch (err) {
-      console.error('Error creating tender:', err);
-      setError('Failed to create tender. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    const [form, setForm] = useState({
+        project: projectId || defaultProjectId || '',
+        name_of_tenders: '',
+        status: 'not_started',
+        tech_opeining: '',
+        financial_opening: '',
+    });
+    const [touched, setTouched] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState(null);
 
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.7)',
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 1000,
-      backdropFilter: 'blur(5px)'
-    }}>
-      <div style={{
-        backgroundColor: 'var(--bg-primary)',
-        padding: '2rem',
-        borderRadius: '12px',
-        width: '100%',
-        maxWidth: '500px',
-        border: '1px solid var(--border-color)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <h2 style={{ margin: 0, fontSize: '1.5rem', color: 'var(--text-primary)' }}>Create New Tender</h2>
-          <button
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '1.2rem' }}
-          >
-            <FaTimes />
-          </button>
-        </div>
+    const project = form.project || (needPicker && projects.length === 1 ? projects[0].id : '');
+    const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-        {error && (
-          <div style={{
-            backgroundColor: 'rgba(255, 59, 48, 0.1)',
-            color: '#ff3b30',
-            padding: '1rem',
-            borderRadius: '8px',
-            marginBottom: '1.5rem'
-          }}>
-            {error}
-          </div>
-        )}
+    const nameError = touched && !form.name_of_tenders.trim() ? 'Give the tender a name (e.g. "Medical Equipment Lot 2").' : null;
+    const projectError = touched && !project ? 'Choose the project this tender belongs to.' : null;
+    const orderWarning = form.tech_opeining && form.financial_opening && form.financial_opening < form.tech_opeining
+        ? 'Financial bids are normally opened after the technical evaluation.' : null;
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Name of Tender</label>
-            <select
-              className="input-field"
-              value={formData.name_of_tenders}
-              onChange={(e) => setFormData({ ...formData, name_of_tenders: e.target.value })}
-              style={{ width: '100%' }}
-            >
-              <option value="NHSP">NHSP</option>
-            </select>
-          </div>
+    const submit = async (e) => {
+        e.preventDefault();
+        setTouched(true);
+        if (!form.name_of_tenders.trim() || !project) return;
+        setSaving(true);
+        setError(null);
+        try {
+            const payload = {
+                project: Number(project),
+                name_of_tenders: form.name_of_tenders.trim(),
+                status: form.status,
+            };
+            if (form.tech_opeining) payload.tech_opeining = form.tech_opeining;
+            if (form.financial_opening) payload.financial_opening = form.financial_opening;
+            const res = await tenderService.create(payload);
+            toast.success('Tender created');
+            onCreated?.(res.data?.data || null);
+        } catch (err) {
+            setError(getErrorMessage(err));
+        } finally {
+            setSaving(false);
+        }
+    };
 
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Status</label>
-            <select
-              className="input-field"
-              value={formData.status}
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-              style={{ width: '100%' }}
-            >
-              <option value="not_started">Not Started</option>
-              <option value="pending">Pending</option>
-              <option value="in_progress">In Progress</option>
-              <option value="on_hold">On Hold</option>
-              <option value="completed">Completed</option>
-            </select>
-          </div>
+    return (
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="New tender"
+            footer={(
+                <>
+                    <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                    <button type="submit" form="create-tender-form" className="btn btn-primary" disabled={saving}>
+                        {saving ? <span className="spinner spinner-sm" /> : <FaPlus size={11} />} Create tender
+                    </button>
+                </>
+            )}
+        >
+            <form id="create-tender-form" onSubmit={submit} noValidate>
+                {error && <div className="alert alert-error mb-4">{error}</div>}
 
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Tech Opening Date</label>
-            <div style={{ position: 'relative' }}>
-              <input
-                ref={techDateRef}
-                type="date"
-                className="input-field"
-                value={formData.tech_opeining}
-                onChange={(e) => setFormData({ ...formData, tech_opeining: e.target.value })}
-                style={{ width: '100%', paddingRight: '2.5rem' }}
-                onClick={(e) => e.target.showPicker && e.target.showPicker()}
-              />
-              <FaCalendarAlt
-                style={{
-                  position: 'absolute',
-                  right: '1rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--primary-500)',
-                  cursor: 'pointer',
-                  pointerEvents: 'none' // Click passes through to input
-                }}
-              />
-            </div>
-          </div>
+                {needPicker && (
+                    <Field label="Project" error={projectError}>
+                        <select className="form-input" value={project} onChange={set('project')} disabled={!projects.length}>
+                            <option value="">{mine.loaded || projectsProp ? 'Select a project…' : 'Loading projects…'}</option>
+                            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                    </Field>
+                )}
 
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>Financial Opening Date</label>
-            <div style={{ position: 'relative' }}>
-              <input
-                ref={financialDateRef}
-                type="date"
-                className="input-field"
-                value={formData.financial_opening}
-                onChange={(e) => setFormData({ ...formData, financial_opening: e.target.value })}
-                style={{ width: '100%', paddingRight: '2.5rem' }}
-                onClick={(e) => e.target.showPicker && e.target.showPicker()}
-              />
-              <FaCalendarAlt
-                style={{
-                  position: 'absolute',
-                  right: '1rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--primary-500)',
-                  cursor: 'pointer',
-                  pointerEvents: 'none'
-                }}
-              />
-            </div>
-          </div>
+                <Field label="Tender name" error={nameError} hint={`${form.name_of_tenders.length}/${NAME_MAX} characters`}>
+                    <input
+                        className="form-input"
+                        value={form.name_of_tenders}
+                        onChange={set('name_of_tenders')}
+                        maxLength={NAME_MAX}
+                        placeholder="e.g. Civil Works Block B"
+                        autoFocus
+                    />
+                </Field>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                padding: '0.75rem 1.5rem',
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                background: 'transparent',
-                color: 'var(--text-primary)',
-                cursor: 'pointer'
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                padding: '0.75rem 1.5rem',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'var(--primary)',
-                color: 'white',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.7 : 1
-              }}
-            >
-              {loading ? 'Creating...' : 'Create Tender'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
+                <Field label="Status">
+                    <div className="segmented mod-segmented-wrap" role="radiogroup" aria-label="Status">
+                        {TENDER_STATUSES.map((s) => (
+                            <button
+                                key={s.value}
+                                type="button"
+                                role="radio"
+                                aria-checked={form.status === s.value}
+                                className={form.status === s.value ? 'active' : ''}
+                                onClick={() => setForm((f) => ({ ...f, status: s.value }))}
+                            >
+                                <span className={`dot tone-${s.tone}`} />{s.label}
+                            </button>
+                        ))}
+                    </div>
+                </Field>
+
+                <div className="form-grid">
+                    <Field label="Technical opening" optional hint="Technical bid opening date">
+                        <input type="date" className="form-input" value={form.tech_opeining} onChange={set('tech_opeining')} />
+                    </Field>
+                    <Field label="Financial opening" optional hint="Financial bid opening date">
+                        <input type="date" className="form-input" value={form.financial_opening} onChange={set('financial_opening')} />
+                    </Field>
+                </div>
+                {orderWarning && <div className="alert alert-warning">{orderWarning}</div>}
+            </form>
+        </Modal>
+    );
 };
 
 export default CreateTenderModal;

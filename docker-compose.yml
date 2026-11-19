@@ -1,0 +1,41 @@
+# pm — SocketSoft PM frontend, served at https://pm.socketsoft.io through the socketsoft Caddy.
+# Deployed by .github/workflows/deploy.yml; the server never builds.
+# The API lives in its own stack (ambag12/Taiga_Project_management → https://pm-api.socketsoft.io).
+name: pm
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "5" }
+
+services:
+  web:
+    build:                                                        # used only for local builds
+      context: .
+      dockerfile: Dockerfile
+      target: web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-https://pm-api.socketsoft.io/api/v1/}
+    image: ${WEB_IMAGE:-pm-web}:${IMAGE_TAG:-latest}              # CI sets both
+    restart: unless-stopped
+    expose: ["8080"]                                              # NO ports:
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    networks:
+      default: {}
+      edge:
+        aliases: [pm-web]                                         # what deploy/pm.caddy proxies to
+    deploy:
+      resources:
+        limits:
+          memory: ${WEB_MEMORY_LIMIT:-64m}
+    security_opt: ["no-new-privileges:true"]
+    logging: *logging
+
+networks:
+  default:
+    name: pm_backend
+  edge:
+    external: true
+    name: ${EDGE_NETWORK:-socketsoft-site_default}                # detected and written by the deploy
