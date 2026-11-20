@@ -8,7 +8,10 @@ x-logging: &logging
   options: { max-size: "10m", max-file: "5" }
 
 services:
-  web:
+  # Named pm-web, not web: Compose registers the service name on every network it joins,
+  # and the socketsoft Caddy proxies socketsoft.io to "web" on the shared edge network.
+  # A service called "web" here would answer for the main domain as well.
+  pm-web:
     build:                                                        # used only for local builds
       context: .
       dockerfile: Dockerfile
