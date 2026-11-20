@@ -26,7 +26,7 @@ const WikiEditor = ({ projectId, page, onSaved, onCancel }) => {
     const [saving, setSaving] = useState(false);
     const dirty = content !== (page.content || '');
 
-    // Debounced server render (same renderer as the saved page: Taiga refs, emoji, mentions…)
+    // Debounced server render (same renderer as the saved page: item refs, emoji, mentions…)
     useEffect(() => {
         if (!content.trim() || content === preview.source) return undefined;
         let alive = true;
@@ -149,7 +149,7 @@ const WikiEditor = ({ projectId, page, onSaved, onCancel }) => {
                             Preview {rendering && <span className="spinner spinner-sm" aria-label="Rendering" />}
                         </div>
                         {previewHtml ? (
-                            // Rendered and sanitised by the Taiga backend (bleach) — same HTML as saved pages.
+                            // Rendered and sanitised by the backend (bleach) — same HTML as saved pages.
                             <div className="prose" dangerouslySetInnerHTML={{ __html: previewHtml }} />
                         ) : (
                             <p className="text-muted text-sm">Nothing to preview yet.</p>

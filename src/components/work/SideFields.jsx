@@ -98,7 +98,7 @@ export const AssignedUsersField = ({ value = [], members, onChange, disabled }) 
     );
 };
 
-/* Due date + Taiga's computed due_date_status */
+/* Due date + the backend's computed due_date_status */
 export const DueDateField = ({ item, onChange, disabled }) => {
     const id = useId();
     const [busy, run] = useBusy();

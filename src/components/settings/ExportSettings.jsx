@@ -93,7 +93,7 @@ const ExportSettings = ({ project, canEdit, patchLocal }) => {
                 })}
             </SettingsSection>
 
-            <SettingsSection icon={<FaFileExport />} title="Export project" description="A complete JSON dump (stories, tasks, issues, wiki, attachments metadata) that can be imported into another Taiga instance.">
+            <SettingsSection icon={<FaFileExport />} title="Export project" description="A complete JSON dump (stories, tasks, issues, wiki, attachments metadata) that can be imported into another the API instance.">
                 <div className="row flex-wrap gap-3">
                     <button className="btn btn-primary" onClick={exportProject} disabled={busy === 'export' || !canEdit}>
                         {busy === 'export' ? <span className="spinner spinner-sm" /> : <><FaFileExport /> Export project</>}

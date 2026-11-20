@@ -1,4 +1,4 @@
-// Permission catalogue (mirrors taiga/permissions/choices.py incl. this fork's tenders/HR/remarks perms).
+// Permission catalogue (mirrors the backend's permissions/choices.py incl. this fork's tenders/HR/remarks perms).
 
 export const PERMISSION_GROUPS = [
     { id: 'project', label: 'Project', perms: [['view_project', 'View project']] },

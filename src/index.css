@@ -827,7 +827,7 @@ hr { border: none; border-top: 1px solid var(--border-light); }
 .badge-priority-high { background: var(--error-light); color: var(--error); }
 .badge-outline { background: transparent; border-color: var(--border-medium); }
 
-/* Status pill driven by a Taiga status color: style="--pill: #hex" */
+/* Status pill driven by an API status color: style="--pill: #hex" */
 .status-pill {
   --pill: var(--neutral-500);
   display: inline-flex;

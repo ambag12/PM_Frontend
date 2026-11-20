@@ -9,7 +9,7 @@ import { HOME_SLUG, pageTitle as defaultTitle, slugify } from './wikiUtils';
 
 /*
  * Left pane of the wiki: curated bookmarks (wiki links) + all pages with search.
- * Creating a bookmark makes Taiga create the target page (slug derived from the title) if missing.
+ * Creating a bookmark makes the API create the target page (slug derived from the title) if missing.
  */
 const WikiSidebar = ({
     projectId, pages, links, currentSlug, onSelect, onCreatePage, onChanged,

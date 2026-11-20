@@ -22,7 +22,7 @@ pm.socketsoft.io {
 	}
 
 	handle_errors 502 503 504 {
-		respond "SocketSoft PM is restarting. Please try again in a minute." 503
+		respond "Agile Project Management System is restarting. Please try again in a minute." 503
 	}
 
 	log {

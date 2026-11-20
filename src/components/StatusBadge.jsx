@@ -2,7 +2,7 @@ import React from 'react';
 
 /*
  * StatusBadge — status pill.
- *   <StatusBadge status={story.status_extra_info} />            Taiga status object {name, color, is_closed}
+ *   <StatusBadge status={story.status_extra_info} />            the API status object {name, color, is_closed}
  *   <StatusBadge status="In progress" color="#E47C40" />         name + colour
  *   <StatusBadge status="Completed" />                           name only → colour guessed from the wording
  */

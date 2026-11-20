@@ -1,6 +1,6 @@
 // Wiki helpers: slugs and titles.
 
-// Mirrors Taiga's slugify closely enough for typical titles ("Meeting notes" -> "meeting-notes").
+// Mirrors the backend's slugify closely enough for typical titles ("Meeting notes" -> "meeting-notes").
 export const slugify = (text) => String(text || '')
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')

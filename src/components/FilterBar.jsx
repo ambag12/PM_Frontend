@@ -12,7 +12,7 @@ import '../styles/planning.css';
  *     values={{ status: [1] }} onChange={setValues}
  *   >{extra controls on the right}</FilterBar>
  *
- * Option shape: { value, label, count?, color?, user? (Taiga user → avatar) }.
+ * Option shape: { value, label, count?, color?, user? (the API user → avatar) }.
  * `values` maps filter key -> array of selected option values.
  */
 

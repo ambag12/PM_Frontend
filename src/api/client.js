@@ -54,7 +54,7 @@ client.interceptors.response.use(
   }
 );
 
-// Normalise Taiga / custom-endpoint error payloads into a readable message.
+// Normalise the API / custom-endpoint error payloads into a readable message.
 export const getErrorMessage = (error, fallback = 'Something went wrong') => {
   const data = error?.response?.data;
   if (!data) return error?.message || fallback;

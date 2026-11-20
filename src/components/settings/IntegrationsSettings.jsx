@@ -37,9 +37,9 @@ const WebhookModal = ({ initial, onClose, onSave }) => {
             <form id="webhook-form" onSubmit={submit}>
                 <Field label="Name"><input className="form-input" value={form.name} onChange={set('name')} required autoFocus /></Field>
                 <Field label="Payload URL" hint="Receives a POST with a JSON body for every change. Local/private network addresses are rejected by the server.">
-                    <input className="form-input" type="url" value={form.url} onChange={set('url')} placeholder="https://example.com/hooks/taiga" required />
+                    <input className="form-input" type="url" value={form.url} onChange={set('url')} placeholder="https://example.com/hooks/pm" required />
                 </Field>
-                <Field label="Secret key" hint="Used to sign payloads (X-TAIGA-WEBHOOK-SIGNATURE header).">
+                <Field label="Secret key" hint="Used to sign each payload (HMAC signature header) so your endpoint can verify it.">
                     <div className="row">
                         <input className="form-input mono" value={form.key} onChange={set('key')} required />
                         <button type="button" className="btn btn-secondary" onClick={() => setForm((f) => ({ ...f, key: randomKey() }))} aria-label="Generate a new key"><FaKey /></button>

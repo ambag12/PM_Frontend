@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 /* Shared helpers for the planning pages (backlog, kanban, sprints, issues, epics). */
 
-// Taiga lists are paginated (30) unless a page size is given; planning boards need everything.
+// the API lists are paginated (30) unless a page size is given; planning boards need everything.
 export const ALL = { page_size: 1000 };
 
 /*
@@ -64,7 +64,7 @@ export function usePersistentState(key, initial) {
     return [value, update];
 }
 
-// Filter values ({ status: [1, 2], tags: ['x'] }) -> Taiga query params ({ status: '1,2', tags: 'x' })
+// Filter values ({ status: [1, 2], tags: ['x'] }) -> the API query params ({ status: '1,2', tags: 'x' })
 export const toParams = (values = {}) => {
     const out = {};
     Object.entries(values).forEach(([k, v]) => {
@@ -75,7 +75,7 @@ export const toParams = (values = {}) => {
 
 export const hasActiveValues = (values = {}) => Object.values(values).some((v) => Array.isArray(v) && v.length);
 
-// Taiga filters_data entries -> FilterBar options
+// the API filters_data entries -> FilterBar options
 export const optionsFrom = {
     values: (list = []) => list.map((x) => ({ value: x.id, label: x.name, color: x.color, count: x.count })),
     users: (list = [], emptyLabel = 'Unassigned') => list.map((x) => ({
@@ -114,7 +114,7 @@ export const fmtPoints = (n) => {
     return Number.isInteger(v) ? String(v) : v.toFixed(1).replace(/\.0$/, '');
 };
 
-// Sum of a Taiga per-role points dict ({ "1": 2.0, "2": 1.0 }) or a plain number
+// Sum of an API per-role points dict ({ "1": 2.0, "2": 1.0 }) or a plain number
 export const sumDict = (d) => {
     if (d === null || d === undefined) return 0;
     if (typeof d === 'number') return d;

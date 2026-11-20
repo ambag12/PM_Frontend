@@ -4,7 +4,7 @@ import '../styles/work.css';
 
 /*
  * Upvote / downvote control.
- * Taiga votes are binary: "upvote" adds your vote, "downvote" removes it.
+ * the API votes are binary: "upvote" adds your vote, "downvote" removes it.
  *   <VoteButtons isUpvoted upvotesCount={2} onUpvote={…} onDownvote={…} onCountClick={…} />
  * Legacy props (isDownvoted, downvotesCount, onRemoveVote) are still accepted.
  */
@@ -35,7 +35,7 @@ const VoteButtons = ({
         }
     };
 
-    // Clicking an active upvote removes it (Taiga's downvote).
+    // Clicking an active upvote removes it (the backend's downvote).
     const handleUp = () => run('up', isUpvoted ? (onRemoveVote || onDownvote) : onUpvote);
     const handleDown = () => run('down', isDownvoted && onRemoveVote ? onRemoveVote : onDownvote);
 

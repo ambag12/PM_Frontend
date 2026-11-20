@@ -49,7 +49,7 @@ export const Loader = ({ label = 'Loading…' }) => (
     </div>
 );
 
-/* StatusPill — pass a Taiga status object ({name, color, is_closed}) or name + color */
+/* StatusPill — pass an API status object ({name, color, is_closed}) or name + color */
 export const StatusPill = ({ status, name, color, className = '' }) => {
     const n = status?.name ?? name;
     const c = status?.color ?? color;
@@ -61,7 +61,7 @@ export const StatusPill = ({ status, name, color, className = '' }) => {
     );
 };
 
-/* TagList — accepts Taiga tags ([[name,color]] or [name]) and optional project.tags_colors */
+/* TagList — accepts the API tags ([[name,color]] or [name]) and optional project.tags_colors */
 export const TagList = ({ tags, tagsColors, max }) => {
     const list = normalizeTags(tags, tagsColors);
     if (!list.length) return null;
@@ -94,7 +94,7 @@ export const Ring = ({ value = 0, size = 72, tone, label }) => (
     </div>
 );
 
-/* UserAvatar — accepts a Taiga user object, or name/src */
+/* UserAvatar — accepts a an API user object, or name/src */
 export const UserAvatar = ({ user, name, src, size = 'sm', title }) => {
     const n = name || userName(user);
     const photo = src || userPhoto(user);

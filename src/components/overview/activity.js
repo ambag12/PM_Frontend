@@ -3,7 +3,7 @@ import {
 } from 'react-icons/fa';
 
 /*
- * Helpers that turn Taiga timeline entries into readable activity rows.
+ * Helpers that turn the API timeline entries into readable activity rows.
  * Timeline entry: { id, event_type: "<app>.<model>.<create|change|delete>", data: { user, project, comment,
  *   values_diff, userstory|task|issue|epic|milestone|wikipage|… }, created, project }
  */

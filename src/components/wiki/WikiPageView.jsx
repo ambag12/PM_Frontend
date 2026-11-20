@@ -85,7 +85,7 @@ const WikiPageView = ({
             <div className="wiki-page-body">
                 {tab === 'content' && (
                     String(page.content || '').trim() ? (
-                        // HTML rendered and sanitised by the Taiga backend.
+                        // HTML rendered and sanitised by the backend.
                         <div className={`prose wiki-prose ${leadingHeading(page.content) ? 'has-title' : ''}`} dangerouslySetInnerHTML={{ __html: page.html || '' }} />
                     ) : (
                         <div className="wiki-empty-page">

@@ -5,7 +5,7 @@ import { PermissionProvider } from './PermissionContext';
 
 /*
  * Loads the current project (from /project/:id/... in the URL) once and shares it with the
- * sidebar, top bar and every project page. The Taiga project detail payload already contains
+ * sidebar, top bar and every project page. The API project detail payload already contains
  * statuses, points, priorities, severities, issue types, members, roles, tags_colors,
  * custom attributes, my_permissions, i_am_admin, and this fork's custom fields
  * (due_date, pc1_url, total_budget, psdp, location, obj_of_proj).

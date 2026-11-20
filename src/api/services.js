@@ -9,7 +9,7 @@ const crud = (base) => ({
     delete: (id, params) => client.delete(`${base}/${id}`, { params }),
 });
 
-// Taiga "project values" (statuses, points, priorities…) all share this shape.
+// the API "project values" (statuses, points, priorities…) all share this shape.
 const projectValues = (base) => ({
     ...crud(base),
     bulkUpdateOrder: (projectId, orderPairs) =>
@@ -55,7 +55,7 @@ const social = (base) => ({
     watch: (id) => client.post(`${base}/${id}/watch`),
     unwatch: (id) => client.post(`${base}/${id}/unwatch`),
     getWatchers: (id) => client.get(`${base}/${id}/watchers`),
-    // Taiga adds comments by PATCHing the item with { comment, version }.
+    // the API adds comments by PATCHing the item with { comment, version }.
     addComment: (id, comment, version) => client.patch(`${base}/${id}`, { comment, version }),
 });
 

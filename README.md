@@ -1,8 +1,8 @@
-# SocketSoft PM — frontend
+# Agile Project Management System — frontend
 
 React 19 + Vite single-page app for project delivery: dashboards, epics, backlog, Kanban, sprints with
 taskboard and burndown, issues, wiki, team, project settings, and the custom Tenders / HR / Remarks modules.
-It talks to the Taiga-based API in [ambag12/Taiga_Project_management](https://github.com/ambag12/Taiga_Project_management).
+It talks to the API in [ambag12/Taiga_Project_management](https://github.com/ambag12/Taiga_Project_management).
 
 - **Production:** https://pm.socketsoft.io (API: https://pm-api.socketsoft.io/api/v1/)
 - **Theme:** SocketSoft dark by default (lime `#c8ff19` on near-black), with a light mode toggle in the top bar.
@@ -11,7 +11,7 @@ It talks to the Taiga-based API in [ambag12/Taiga_Project_management](https://gi
 
 ```bash
 npm ci
-VITE_API_URL=http://localhost:8010/api/v1/ npm run dev     # point at any Taiga API
+VITE_API_URL=http://localhost:8010/api/v1/ npm run dev     # point at any instance of the API
 npm run lint && npm run build
 ```
 

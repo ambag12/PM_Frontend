@@ -7,7 +7,7 @@ import { Loader } from '../UI';
 
 const isImage = (name) => /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(name || '');
 
-/* Attachments of a wiki page (Taiga attachments: list / upload / delete). */
+/* Attachments of a wiki page (the API attachments: list / upload / delete). */
 const WikiAttachments = ({ projectId, pageId, canEdit, onCountChange }) => {
     const toast = useToast();
     const confirm = useConfirm();

@@ -37,7 +37,7 @@ const TaskForm = ({ project, projectId, formId, setBusy, onTaskCreated, onClose,
 
     const sprints = (project.milestones || []).filter((m) => !m.closed || String(m.id) === String(form.milestone));
 
-    // Picking a story moves the task into that story's sprint (the usual Taiga behaviour).
+    // Picking a story moves the task into that story's sprint (the usual the API behaviour).
     const pickStory = (value) => {
         const s = (stories || []).find((x) => String(x.id) === String(value));
         setForm((f) => ({ ...f, user_story: value, milestone: s ? (s.milestone ?? '') : f.milestone }));

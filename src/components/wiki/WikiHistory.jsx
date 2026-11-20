@@ -65,7 +65,7 @@ const WikiHistory = ({ pageId, version }) => {
                                         {openId === h.id ? 'Hide changes' : 'Show changes'}
                                     </button>
                                     {openId === h.id && (
-                                        // HTML diff produced by the Taiga backend.
+                                        // HTML diff produced by the backend.
                                         <div className="wiki-diff" dangerouslySetInnerHTML={{ __html: diff }} />
                                     )}
                                 </>

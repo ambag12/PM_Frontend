@@ -15,7 +15,7 @@ export const AuthAside = ({ heading = 'Deliver public projects on time and on bu
         <div className="ov-auth-brand">
             <div className="sidebar-logo"><Logo size={40} /></div>
             <div className="ov-auth-brand-name">
-                SocketSoft PM
+                Agile Project Management System
                 <small>Planning · Delivery · Oversight</small>
             </div>
         </div>
@@ -34,14 +34,14 @@ export const AuthAside = ({ heading = 'Deliver public projects on time and on bu
                 ))}
             </div>
         </div>
-        <div className="ov-auth-foot">© {new Date().getFullYear()} SocketSoft · Secure access for authorised staff</div>
+        <div className="ov-auth-foot">© {new Date().getFullYear()} Agile Project Management System · Secure access for authorised staff</div>
     </aside>
 );
 
 export const AuthMobileBrand = () => (
     <div className="ov-auth-mobile-brand">
         <div className="sidebar-logo"><Logo size={40} /></div>
-        SocketSoft PM
+        Agile PM
     </div>
 );
 

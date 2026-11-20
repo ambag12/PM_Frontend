@@ -63,7 +63,7 @@ export const WORK_TYPES = {
     },
 };
 
-// Taiga returns 400 { version: "The version doesn't match with the current one" } on stale writes.
+// the API returns 400 { version: "The version doesn't match with the current one" } on stale writes.
 export const isVersionConflict = (err) => {
     const data = err?.response?.data;
     if (err?.response?.status !== 400 || !data) return false;

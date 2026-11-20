@@ -1,6 +1,6 @@
-# pm — SocketSoft PM frontend, served at https://pm.socketsoft.io through the socketsoft Caddy.
+# pm — Agile Project Management System frontend, served at https://pm.socketsoft.io through the socketsoft Caddy.
 # Deployed by .github/workflows/deploy.yml; the server never builds.
-# The API lives in its own stack (ambag12/Taiga_Project_management → https://pm-api.socketsoft.io).
+# The API lives in its own stack (ambag12/Taiga_Project_management repo → https://pm-api.socketsoft.io).
 name: pm
 
 x-logging: &logging

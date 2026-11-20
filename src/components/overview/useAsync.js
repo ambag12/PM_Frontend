@@ -43,7 +43,7 @@ export default function useAsync(loader, deps = []) {
     };
 }
 
-// Read the total count Taiga sends in the pagination headers (falls back to the list length).
+// Read the total count the API sends in the pagination headers (falls back to the list length).
 export const totalFromHeaders = (res) => {
     const n = Number(res?.headers?.['x-pagination-count']);
     return Number.isFinite(n) && res?.headers?.['x-pagination-count'] !== undefined

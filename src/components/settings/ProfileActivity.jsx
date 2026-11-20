@@ -18,7 +18,7 @@ const itemLink = (kind, obj, projectId) => {
     return `/project/${projectId}`;
 };
 
-/* Turn a Taiga timeline entry ("userstories.userstory.change") into a readable row. */
+/* Turn an API timeline entry ("userstories.userstory.change") into a readable row. */
 const describe = (entry) => {
     const [, kind = '', action = ''] = (entry.event_type || '').split('.');
     const d = entry.data || {};

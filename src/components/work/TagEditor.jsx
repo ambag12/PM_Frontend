@@ -5,7 +5,7 @@ import { normalizeTags } from '../../utils/format';
 /*
  * Tag editor — used by the drawers (saves on every change) and the create modals (form value).
  *   <TagEditor value={item.tags} tagsColors={project.tags_colors} onChange={(names) => save({ tags: names })} />
- * value accepts Taiga tags ([[name, color]] or [name]); onChange receives an array of tag names.
+ * value accepts the API tags ([[name, color]] or [name]); onChange receives an array of tag names.
  */
 const TagEditor = ({ value, tagsColors = {}, onChange, disabled = false, placeholder = 'Add a tag…' }) => {
     const listId = useId();

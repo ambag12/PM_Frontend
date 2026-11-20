@@ -35,7 +35,7 @@ const Sidebar = ({ collapsed, onToggle, className = '' }) => {
     const [showRemarksModal, setShowRemarksModal] = useState(false);
 
     const base = projectId ? `/project/${projectId}` : null;
-    // Taiga feature toggles default to "on" until the project has loaded
+    // Project feature toggles default to "on" until the project has loaded
     const on = (flag) => (project ? project[flag] !== false : true);
 
     const onSearch = (e) => {
@@ -51,8 +51,8 @@ const Sidebar = ({ collapsed, onToggle, className = '' }) => {
             <div className="sidebar-header">
                 <div className="sidebar-logo"><Logo size={34} /></div>
                 <span className="sidebar-title">
-                    SocketSoft PM
-                    <small>Planning · Delivery · Oversight</small>
+                    Agile PM
+                    <small>Project Management System</small>
                 </span>
             </div>
 

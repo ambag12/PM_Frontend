@@ -64,11 +64,11 @@ export const formatBytes = (bytes) => {
 
 export const percent = (part, total) => (total ? Math.round((Number(part) / Number(total)) * 100) : 0);
 
-// Taiga user objects vary by endpoint: { full_name_display, full_name, username, photo, big_photo, gravatar_id }
+// API user objects vary by endpoint: { full_name_display, full_name, username, photo, big_photo, gravatar_id }
 export const userName = (u) => (u ? u.full_name_display || u.full_name || u.username || u.email || 'Unknown' : 'Unassigned');
 export const userPhoto = (u) => (u ? u.photo || u.big_photo || null : null);
 
-// Taiga tags come as [[name, color], …] or ["name", …]
+// API tags come as [[name, color], …] or ["name", …]
 export const normalizeTags = (tags, tagsColors = {}) =>
     (tags || []).map((t) => (Array.isArray(t) ? { name: t[0], color: t[1] || tagsColors[t[0]] || null } : { name: t, color: tagsColors[t] || null }));
 

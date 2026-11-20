@@ -7,7 +7,7 @@ import { PRESET_COLORS } from './constants';
 import { useAsyncData, useDragReorder } from './hooks';
 
 /*
- * Generic editor for a Taiga "project value" list.
+ * Generic editor for an API "project value" list.
  * kind = {
  *   id, label, noun, service,           // service: list/create/update/delete (+ bulkUpdateOrder, deleteMoveTo)
  *   color?: bool, flags?: [{key,label}], wip?: bool, value?: bool, dueDate?: bool,
